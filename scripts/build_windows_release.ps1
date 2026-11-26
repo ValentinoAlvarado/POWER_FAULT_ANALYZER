@@ -15,13 +15,35 @@ function Invoke-Checked {
     if ($LASTEXITCODE -ne 0) { throw "$Name failed with exit code $LASTEXITCODE." }
 }
 
-$BootstrapPython = (Get-Command python -ErrorAction Stop).Source
-$Python = Join-Path $RepositoryRoot '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $Python)) {
-    & $BootstrapPython -m venv (Join-Path $RepositoryRoot '.venv')
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to create the isolated release virtual environment.' }
+$PythonLocation = $env:pythonLocation
+if (-not [string]::IsNullOrWhiteSpace($PythonLocation)) {
+    # setup-python provides this exact interpreter path. Do not resolve "python"
+    # from PATH because setup-msys2 may prepend its own Python installation.
+    $BootstrapPython = Join-Path $PythonLocation 'python.exe'
+    if (-not (Test-Path -LiteralPath $BootstrapPython -PathType Leaf)) {
+        throw "setup-python interpreter not found: $BootstrapPython"
+    }
 }
-if (-not (Test-Path -LiteralPath $Python)) { throw "Release virtual environment not found: $Python" }
+else {
+    # Local builds outside GitHub Actions retain the normal PATH fallback.
+    $BootstrapPython = (Get-Command python -ErrorAction Stop).Source
+}
+
+$Python = Join-Path $RepositoryRoot '.venv\Scripts\python.exe'
+$VenvPath = Join-Path $RepositoryRoot '.venv'
+Write-Host "Bootstrap Python: $BootstrapPython"
+
+if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    Write-Host "Creating isolated release environment: $VenvPath"
+    & $BootstrapPython -m venv $VenvPath
+    $venvExitCode = $LASTEXITCODE
+    if ($venvExitCode -ne 0) {
+        throw "Unable to create the isolated release virtual environment (exit code $venvExitCode)."
+    }
+}
+if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    throw "Release virtual environment was not created. Expected interpreter: $Python"
+}
 $pythonVersion = & $Python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
 if ($LASTEXITCODE -ne 0 -or $pythonVersion -ne '3.13') { throw "Release build requires Python 3.13; detected $pythonVersion." }
 $pythonArch = & $Python -c "import struct; print(struct.calcsize('P') * 8)"

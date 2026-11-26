@@ -39,6 +39,7 @@ from power_fault_analyzer.equipment.sources.equivalent_source import EquivalentS
 from power_fault_analyzer.equipment.sources.synchronous_generator import SynchronousGenerator
 from power_fault_analyzer.infrastructure.symbols.qet_elmt import SymbolDefinition
 from power_fault_analyzer.interfaces.desktop.workbench.qet_symbol_item import QETSymbolItem
+from power_fault_analyzer.interfaces.desktop.workbench.design_system import palette_for_theme
 
 ROLE_ELEMENT = 0
 
@@ -697,7 +698,8 @@ class NetworkCanvasView(QGraphicsView):
         self.setRubberBandSelectionMode(Qt.ItemSelectionMode.IntersectsItemShape)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
-        self.setBackgroundBrush(QColor("#FFFFFF"))
+        self._theme_palette = palette_for_theme("dark")
+        self.setBackgroundBrush(QColor(self._theme_palette.canvas))
         self._scene.selectionChanged.connect(self._emit_selection)
         self._build_empty_state()
 
@@ -1451,6 +1453,12 @@ class NetworkCanvasView(QGraphicsView):
         finally:
             self._applying_position = False
 
+    def set_visual_theme(self, theme: str) -> None:
+        """Apply canvas-specific colors without altering electrical geometry."""
+        self._theme_palette = palette_for_theme(theme)
+        self.setBackgroundBrush(QColor(self._theme_palette.canvas))
+        self.viewport().update()
+
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
         super().drawBackground(painter, rect)
         if not self._grid_visible:
@@ -1471,10 +1479,10 @@ class NetworkCanvasView(QGraphicsView):
             target = major_lines if math.isclose(y % major_grid, 0.0, abs_tol=1e-7) else fine_lines
             target.append((QPointF(rect.left(), y), QPointF(rect.right(), y)))
             y += fine_grid
-        painter.setPen(QPen(QColor("#F2F4F7"), 0.0))
+        painter.setPen(QPen(QColor(self._theme_palette.canvas_grid_minor), 0.0))
         for start, end in fine_lines:
             painter.drawLine(start, end)
-        painter.setPen(QPen(QColor("#E7EBF0"), 0.0))
+        painter.setPen(QPen(QColor(self._theme_palette.canvas_grid_major), 0.0))
         for start, end in major_lines:
             painter.drawLine(start, end)
 

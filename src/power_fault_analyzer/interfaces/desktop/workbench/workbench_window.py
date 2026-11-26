@@ -3099,7 +3099,7 @@ QSplitter::handle:vertical { height: 8px; margin: 1px 0; }
 """
 
 _DARK_WORKBENCH_STYLESHEET = """
-QMainWindow, QWidget { background: #182230; color: #E5EDF5; font-family: "Segoe UI"; }
+QMainWindow, QWidget { background: #182230; color: #E5EDF5; font-family: "Segoe UI"; font-size: 10pt; }
 QMenuBar, QToolBar, QStatusBar { background: #202D3D; color: #E5EDF5; border-color: #3D5066; }
 QMenu { background: #202D3D; color: #E5EDF5; border: 1px solid #3D5066; }
 QMenu::item:selected, QTreeWidget::item:selected { background: #304B6B; color: #FFFFFF; }

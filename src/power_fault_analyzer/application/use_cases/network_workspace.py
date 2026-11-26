@@ -141,8 +141,8 @@ class DiagramLabelPlacement:
     x: float
     y: float
     anchor: str = "middle"
-    font_family: str = "STIX Two Text"
-    size_pt: float = 7.5
+    font_family: str = "Segoe UI"
+    size_pt: float = 9.0
     weight: str = "normal"
     color: str = "#172033"
     rotation_deg: float = 0.0
@@ -196,8 +196,8 @@ class DiagramLabelPlacement:
     @classmethod
     def create(
         cls, text: str, x: float, y: float, *, owner_id: UUID | None = None,
-        anchor: str = "middle", font_family: str = "STIX Two Text",
-        size_pt: float = 7.5, weight: str = "normal", color: str = "#172033",
+        anchor: str = "middle", font_family: str = "Segoe UI",
+        size_pt: float = 9.0, weight: str = "normal", color: str = "#172033",
         rotation_deg: float = 0.0, visible: bool = True,
         layer: str = "annotations", priority: int = 50,
         unit: str | None = None, number_format: str | None = None,

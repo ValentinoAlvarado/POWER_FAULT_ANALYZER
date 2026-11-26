@@ -584,7 +584,7 @@ class BranchSymbol(QGraphicsPathItem):
         self.set_endpoints(from_point, to_point)
         self.label_item = QGraphicsSimpleTextItem(label)
         self.label_item.setBrush(QBrush(QColor("#0F172A")))
-        self.label_item.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        self.label_item.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
         self.label_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
         self.label_item.setZValue(5)
         self._initializing = False

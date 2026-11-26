@@ -43,23 +43,33 @@ from power_fault_analyzer.interfaces.desktop.workbench.qet_symbol_item import QE
 ROLE_ELEMENT = 0
 
 
+def _snap_graphics_position(point: QPointF, grid_spacing: float) -> QPointF:
+    """Return the nearest grid intersection for an interactive graphics move."""
+    spacing = float(grid_spacing)
+    if not math.isfinite(spacing) or spacing <= 0.0:
+        raise ValueError("grid_spacing must be a finite positive value.")
+    return QPointF(round(point.x() / spacing) * spacing, round(point.y() / spacing) * spacing)
+
+
 class BusSymbol(QGraphicsObject):
     moved = Signal(str, float, float)
     move_committed = Signal(str, float, float, float, float)
 
     def __init__(
         self, identifier: UUID, name: str, nominal_kv: float, snap: bool, kind: BusKind,
-        width: float = 600.0,
+        width: float = 600.0, grid_spacing: float = 20.0,
     ) -> None:
         super().__init__()
         self._initializing = True
         self.identifier = identifier
         self.name = name
         self.nominal_kv = nominal_kv
-        self.snap = snap
+        self.snap = bool(snap)
+        self.grid_spacing = float(grid_spacing)
         self.kind = kind
         self.width = float(width)
         self._drag_start = QPointF()
+        self._dragging = False
         self.setData(ROLE_ELEMENT, ("bus", str(identifier)))
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsMovable
@@ -103,10 +113,12 @@ class BusSymbol(QGraphicsObject):
 
     def mousePressEvent(self, event) -> None:
         self._drag_start = self.pos()
+        self._dragging = True
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         super().mouseReleaseEvent(event)
+        self._dragging = False
         current = self.pos()
         if (current - self._drag_start).manhattanLength() > 0.1:
             self.move_committed.emit(
@@ -118,10 +130,12 @@ class BusSymbol(QGraphicsObject):
             )
 
     def itemChange(self, change, value):
-        if change is QGraphicsItem.GraphicsItemChange.ItemPositionChange and self.snap:
-            grid = 20.0
-            point = value
-            return QPointF(round(point.x() / grid) * grid, round(point.y() / grid) * grid)
+        if (
+            change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
+            and self.snap
+            and self._dragging
+        ):
+            return _snap_graphics_position(value, self.grid_spacing)
         if (
             change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged
             and not getattr(self, "_initializing", True)
@@ -140,15 +154,29 @@ class CanonicalEquipmentSymbol(QGraphicsObject):
     move_committed = Signal(str, float, float, float, float)
     label_changed = Signal(str, str)
 
-    def __init__(self, identifier: UUID, name: str, family: str, state: str | None,
-                 width: float, height: float, orientation_deg: float = 0.0,
-                 label_text: str | None = None) -> None:
+    def __init__(
+        self,
+        identifier: UUID,
+        name: str,
+        family: str,
+        state: str | None,
+        width: float,
+        height: float,
+        orientation_deg: float = 0.0,
+        label_text: str | None = None,
+        *,
+        snap_enabled: bool = False,
+        grid_spacing: float = 20.0,
+    ) -> None:
         super().__init__()
         self._initializing = True
         self.identifier, self.name, self.family, self.state = identifier, name, family, state
         self.width, self.height = width, height
         self.orientation_deg = orientation_deg
         self._drag_start = QPointF()
+        self._dragging = False
+        self.snap_enabled = bool(snap_enabled)
+        self.grid_spacing = float(grid_spacing)
         self.setData(ROLE_ELEMENT, ("equipment", str(identifier)))
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable
                       | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
@@ -228,16 +256,24 @@ class CanonicalEquipmentSymbol(QGraphicsObject):
         painter.restore()
     def mousePressEvent(self, event) -> None:
         self._drag_start = self.pos()
+        self._dragging = True
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         super().mouseReleaseEvent(event)
+        self._dragging = False
         current = self.pos()
         if (current-self._drag_start).manhattanLength() > 0.1:
             self.move_committed.emit(str(self.identifier), self._drag_start.x(),
                 self._drag_start.y(), current.x(), current.y())
 
     def itemChange(self, change, value):
+        if (
+            change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
+            and self.snap_enabled
+            and self._dragging
+        ):
+            return _snap_graphics_position(value, self.grid_spacing)
         if (
             change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged
             and not getattr(self, "_initializing", True)
@@ -253,13 +289,24 @@ class SourceSymbol(QGraphicsObject):
     moved = Signal(str, float, float)
     move_committed = Signal(str, float, float, float, float)
 
-    def __init__(self, identifier: UUID, name: str, subtype: str) -> None:
+    def __init__(
+        self,
+        identifier: UUID,
+        name: str,
+        subtype: str,
+        *,
+        snap_enabled: bool = False,
+        grid_spacing: float = 20.0,
+    ) -> None:
         super().__init__()
         self._initializing = True
         self.identifier = identifier
         self.name = name
         self.subtype = subtype
         self._drag_start = QPointF()
+        self._dragging = False
+        self.snap_enabled = bool(snap_enabled)
+        self.grid_spacing = float(grid_spacing)
         self.setData(ROLE_ELEMENT, ("generator", str(identifier)))
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsMovable
@@ -289,10 +336,12 @@ class SourceSymbol(QGraphicsObject):
 
     def mousePressEvent(self, event) -> None:
         self._drag_start = self.pos()
+        self._dragging = True
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         super().mouseReleaseEvent(event)
+        self._dragging = False
         current = self.pos()
         if (current - self._drag_start).manhattanLength() > 0.1:
             self.move_committed.emit(
@@ -304,6 +353,12 @@ class SourceSymbol(QGraphicsObject):
             )
 
     def itemChange(self, change, value):
+        if (
+            change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
+            and self.snap_enabled
+            and self._dragging
+        ):
+            return _snap_graphics_position(value, self.grid_spacing)
         if (
             change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged
             and not getattr(self, "_initializing", True)
@@ -498,7 +553,15 @@ class BranchSymbol(QGraphicsPathItem):
     """
 
     def __init__(
-        self, identifier: UUID, name: str, from_point: QPointF, to_point: QPointF, label: str
+        self,
+        identifier: UUID,
+        name: str,
+        from_point: QPointF,
+        to_point: QPointF,
+        label: str,
+        *,
+        snap_enabled: bool = False,
+        grid_spacing: float = 20.0,
     ) -> None:
         super().__init__()
         self._branch_signals = _BranchSymbolSignals()
@@ -506,6 +569,9 @@ class BranchSymbol(QGraphicsPathItem):
         self.identifier = identifier
         self.name = name
         self._drag_start = QPointF()
+        self._dragging = False
+        self.snap_enabled = bool(snap_enabled)
+        self.grid_spacing = float(grid_spacing)
         self.setData(ROLE_ELEMENT, ("line", str(identifier)))
         self.setZValue(2)
         self.setFlags(
@@ -546,10 +612,12 @@ class BranchSymbol(QGraphicsPathItem):
 
     def mousePressEvent(self, event) -> None:
         self._drag_start = self.pos()
+        self._dragging = True
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         super().mouseReleaseEvent(event)
+        self._dragging = False
         current = self.pos()
         if (current - self._drag_start).manhattanLength() > 0.1:
             self.move_committed.emit(
@@ -558,6 +626,12 @@ class BranchSymbol(QGraphicsPathItem):
             )
 
     def itemChange(self, change, value):
+        if (
+            change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
+            and self.snap_enabled
+            and self._dragging
+        ):
+            return _snap_graphics_position(value, self.grid_spacing)
         if (
             change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged
             and not getattr(self, "_initializing", True)
@@ -794,8 +868,15 @@ class NetworkCanvasView(QGraphicsView):
         for bus in network.buses:
             projected = next(item for item in document.buses if item.bus_id == bus.id)
             bar_length = max(projected.bounds.width, projected.bounds.height)
-            item = BusSymbol(bus.id, bus.name, bus.nominal_voltage.value_kv,
-                             self._snap_enabled, bus.kind, bar_length)
+            item = BusSymbol(
+                bus.id,
+                bus.name,
+                bus.nominal_voltage.value_kv,
+                self._snap_enabled,
+                bus.kind,
+                bar_length,
+                self._workspace.grid_spacing,
+            )
             item.setPos(bus_positions[str(bus.id)])
             self._last_layout_positions[str(bus.id)] = (item.pos().x(), item.pos().y())
             item.setTransformOriginPoint(QPointF(0.0, 0.0))
@@ -828,16 +909,30 @@ class NetworkCanvasView(QGraphicsView):
                 # projected from the exact terminal-to-bus connection records.
                 p1 = QPointF(projected.terminal_points[0].x, projected.terminal_points[0].y)
                 p2 = QPointF(projected.terminal_points[1].x, projected.terminal_points[1].y)
-                line = BranchSymbol(equipment.id, equipment.name, p1, p2, "")
+                line = BranchSymbol(
+                    equipment.id,
+                    equipment.name,
+                    p1,
+                    p2,
+                    "",
+                    snap_enabled=self._snap_enabled,
+                    grid_spacing=self._workspace.grid_spacing,
+                )
                 self._scene.addItem(line)
                 self._branch_items[str(equipment.id)] = line
                 self._last_layout_positions[str(equipment.id)] = (line.pos().x(), line.pos().y())
                 line.moved.connect(self._on_layout_changed)
                 line.move_committed.connect(self.position_committed.emit)
             elif projected.family == "source" and isinstance(equipment, (EquivalentSource, SynchronousGenerator)):
-                symbol = SourceSymbol(equipment.id, equipment.name, "equivalent_source"
-                                      if isinstance(equipment, EquivalentSource)
-                                      else "synchronous_generator")
+                symbol = SourceSymbol(
+                    equipment.id,
+                    equipment.name,
+                    "equivalent_source"
+                    if isinstance(equipment, EquivalentSource)
+                    else "synchronous_generator",
+                    snap_enabled=self._snap_enabled,
+                    grid_spacing=self._workspace.grid_spacing,
+                )
                 symbol.setPos(QPointF(projected.center.x, projected.center.y))
                 self._last_layout_positions[str(equipment.id)] = (symbol.pos().x(), symbol.pos().y())
                 symbol.moved.connect(self._on_layout_changed)
@@ -851,8 +946,12 @@ class NetworkCanvasView(QGraphicsView):
                 )
                 symbol = CanonicalEquipmentSymbol(
                     equipment.id, equipment.name, projected.family, projected.state,
-                    projected.width, projected.height, projected.orientation_deg,
+                    projected.width,
+                    projected.height,
+                    projected.orientation_deg,
                     projected_label,
+                    snap_enabled=self._snap_enabled,
+                    grid_spacing=self._workspace.grid_spacing,
                 )
                 symbol.setPos(QPointF(projected.center.x, projected.center.y))
                 self._last_layout_positions[str(equipment.id)] = (symbol.pos().x(), symbol.pos().y())
@@ -1312,10 +1411,19 @@ class NetworkCanvasView(QGraphicsView):
 
     def set_snap_enabled(self, enabled: bool) -> None:
         self._snap_enabled = bool(enabled)
+        spacing = self._workspace.grid_spacing if self._workspace is not None else 20.0
         for item in self._bus_items.values():
             item.snap = self._snap_enabled
-        for item in self._draft_symbol_items.values():
-            item.snap_enabled = self._snap_enabled
+            item.grid_spacing = spacing
+        for collection in (
+            self._source_items,
+            self._equipment_items,
+            self._branch_items,
+            self._draft_symbol_items,
+        ):
+            for item in collection.values():
+                item.snap_enabled = self._snap_enabled
+                item.grid_spacing = spacing
         if self._workspace is not None:
             self._workspace.snap_enabled = self._snap_enabled
 
@@ -1331,12 +1439,13 @@ class NetworkCanvasView(QGraphicsView):
         self._applying_position = True
         try:
             item.setPos(QPointF(x, y))
+            actual_x, actual_y = item.pos().x(), item.pos().y()
             if self._workspace is not None:
                 key = UUID(identifier)
                 if key in self._workspace.diagram_symbols:
-                    self._workspace.update_diagram_symbol(key, x=x, y=y)
+                    self._workspace.update_diagram_symbol(key, x=actual_x, y=actual_y)
                 else:
-                    self._workspace.diagram_positions[key] = (float(x), float(y))
+                    self._workspace.diagram_positions[key] = (actual_x, actual_y)
             self._update_branch_geometry()
         finally:
             self._applying_position = False
@@ -1345,8 +1454,8 @@ class NetworkCanvasView(QGraphicsView):
         super().drawBackground(painter, rect)
         if not self._grid_visible:
             return
-        fine_grid = 20.0
-        major_grid = 100.0
+        fine_grid = self._workspace.grid_spacing if self._workspace is not None else 20.0
+        major_grid = fine_grid * 5.0
         left = math.floor(rect.left() / fine_grid) * fine_grid
         top = math.floor(rect.top() / fine_grid) * fine_grid
         fine_lines = []

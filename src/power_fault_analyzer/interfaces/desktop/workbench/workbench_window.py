@@ -20,8 +20,17 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter, QUndoCommand, QUndoStack
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QUndoCommand,
+    QUndoStack,
+)
 from PySide6.QtWidgets import (
+    QApplication,
     QDockWidget,
     QDoubleSpinBox,
     QFileDialog,
@@ -477,9 +486,15 @@ class WorkbenchWindow(QMainWindow):
         analysis_menu.addAction(self.run_action)
 
         self.view_menu = bar.addMenu("&View")
-        self.theme_action = self._action(
-            "Use Light Theme" if self._dark_theme else "Use Dark Theme",
-            self._toggle_theme,
+        self.theme_action = self._action("Dark mode", self._toggle_theme)
+        self.theme_action.setCheckable(True)
+        self.theme_action.setChecked(self._dark_theme)
+        self.theme_action.setToolTip(
+            "Toggle the dark workbench shell. The electrical drawing sheet remains light "
+            "to preserve symbol and annotation contrast."
+        )
+        self.theme_action.setIcon(
+            self._awesome_icon("fa5s.moon", QStyle.StandardPixmap.SP_DialogHelpButton)
         )
         self.view_menu.addAction(self.theme_action)
         self.show_source_candidates_action = QAction("Show QET drawing-only candidates", self)
@@ -630,9 +645,9 @@ class WorkbenchWindow(QMainWindow):
         toolbar.setObjectName("EngineeringCommandBar")
         toolbar.setMovable(False)
         toolbar.setFloatable(False)
-        toolbar.setIconSize(QSize(20, 20))
+        toolbar.setIconSize(QSize(17, 17))
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        toolbar.setContentsMargins(8, 3, 8, 3)
+        toolbar.setContentsMargins(5, 1, 5, 1)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
         self.command_toolbar = toolbar
 
@@ -724,6 +739,8 @@ class WorkbenchWindow(QMainWindow):
             self._awesome_icon("fa5s.file-image", QStyle.StandardPixmap.SP_DialogSaveButton)
         )
         toolbar.addAction(self.export_diagram_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.theme_action)
 
     # ------------------------------------------------------------- main layout
     def _panel(self, title: str, content: QWidget, *, show_heading: bool = True) -> QFrame:
@@ -731,6 +748,7 @@ class WorkbenchWindow(QMainWindow):
         panel_key = "".join(character if character.isalnum() else "_" for character in title)
         panel.setObjectName(f"WorkbenchPanel_{panel_key.strip('_')}")
         panel.setProperty("workbenchPanel", True)
+        content.setObjectName("WorkbenchPanelContent")
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(8, 7, 8, 8)
         layout.setSpacing(6)
@@ -746,8 +764,8 @@ class WorkbenchWindow(QMainWindow):
     def _build_docks(self) -> None:
         explorer_content = QWidget()
         explorer_layout = QVBoxLayout(explorer_content)
-        explorer_layout.setContentsMargins(10, 10, 10, 10)
-        explorer_layout.setSpacing(8)
+        explorer_layout.setContentsMargins(8, 7, 8, 7)
+        explorer_layout.setSpacing(6)
         explorer_heading = QLabel("PROJECT STRUCTURE")
         explorer_heading.setObjectName("SectionEyebrow")
         explorer_layout.addWidget(explorer_heading)
@@ -768,8 +786,8 @@ class WorkbenchWindow(QMainWindow):
 
         palette = QWidget()
         palette_layout = QVBoxLayout(palette)
-        palette_layout.setContentsMargins(10, 10, 10, 10)
-        palette_layout.setSpacing(10)
+        palette_layout.setContentsMargins(8, 7, 8, 7)
+        palette_layout.setSpacing(7)
         palette_intro = QLabel("CORE NETWORK EQUIPMENT")
         palette_intro.setObjectName("SectionEyebrow")
         palette_layout.addWidget(palette_intro)
@@ -809,7 +827,7 @@ class WorkbenchWindow(QMainWindow):
         ):
             button = QPushButton(f"{label}\n{title}")
             button.setObjectName("EquipmentTile")
-            button.setMinimumHeight(76)
+            button.setMinimumHeight(58)
             button.setIcon(self._awesome_icon(icon_name, fallback_icon))
             button.setIconSize(QSize(24, 24))
             button.setToolTip(f"Insert {title}")
@@ -827,7 +845,7 @@ class WorkbenchWindow(QMainWindow):
                 "fa5s.project-diagram", QStyle.StandardPixmap.SP_FileDialogContentsView
             )
         )
-        template_button.setMinimumHeight(40)
+        template_button.setMinimumHeight(34)
         template_button.clicked.connect(self._load_reference_template)
         palette_layout.addWidget(template_button)
         substation_button = QPushButton("Build PFA-ES-001 · 220 kV Double Bus")
@@ -836,7 +854,7 @@ class WorkbenchWindow(QMainWindow):
         substation_button.setIcon(
             self._awesome_icon("fa5s.subway", QStyle.StandardPixmap.SP_ComputerIcon)
         )
-        substation_button.setMinimumHeight(44)
+        substation_button.setMinimumHeight(36)
         substation_button.setToolTip(
             "Builds a double-bus substation with explicit switch topology and unresolved "
             "line/transformer data boundaries. No synthetic electrical parameters are added."
@@ -952,7 +970,7 @@ class WorkbenchWindow(QMainWindow):
             self._awesome_icon("fa5s.shapes", QStyle.StandardPixmap.SP_FileDialogContentsView),
             "Source Library",
         )
-        self.inspector_tabs.setMinimumWidth(315)
+        self.inspector_tabs.setMinimumWidth(275)
 
         self.console = QPlainTextEdit()
         self.console.setReadOnly(True)
@@ -1016,6 +1034,7 @@ class WorkbenchWindow(QMainWindow):
 
     def _build_central_workspace(self) -> None:
         self.workspace_tabs = QTabWidget()
+        self.workspace_tabs.setObjectName("MainWorkspaceTabs")
         self.canvas = NetworkCanvasView()
         if self.symbol_browser.catalog is not None:
             self.canvas.set_symbol_definitions(
@@ -1029,14 +1048,15 @@ class WorkbenchWindow(QMainWindow):
         # Keep the diagram itself as the dominant document surface. Its context
         # controls live in a shallow document bar rather than in floating panels.
         design_page = QWidget()
+        design_page.setObjectName("NetworkDesignPage")
         design_layout = QVBoxLayout(design_page)
         design_layout.setContentsMargins(0, 0, 0, 0)
         design_layout.setSpacing(0)
         self.diagram_header = QFrame()
         self.diagram_header.setObjectName("DiagramDocumentBar")
         header_layout = QHBoxLayout(self.diagram_header)
-        header_layout.setContentsMargins(16, 8, 14, 8)
-        header_layout.setSpacing(10)
+        header_layout.setContentsMargins(12, 4, 10, 4)
+        header_layout.setSpacing(7)
         document_identity = QVBoxLayout()
         document_identity.setSpacing(1)
         self.diagram_eyebrow = QLabel("NETWORK MODEL  /  SINGLE-LINE DIAGRAM")
@@ -1124,8 +1144,8 @@ class WorkbenchWindow(QMainWindow):
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
         self.main_splitter.setStretchFactor(2, 0)
-        self.explorer_panel.setMinimumWidth(205)
-        self.inspector_tabs.setMinimumWidth(315)
+        self.explorer_panel.setMinimumWidth(190)
+        self.inspector_tabs.setMinimumWidth(275)
         self.main_splitter.setCollapsible(0, True)
         self.main_splitter.setCollapsible(1, False)
         self.main_splitter.setCollapsible(2, True)
@@ -1134,7 +1154,7 @@ class WorkbenchWindow(QMainWindow):
             handle = self.main_splitter.handle(index)
             handle.setCursor(Qt.CursorShape.SplitHCursor)
             handle.setToolTip("Drag to resize or collapse the workspace sidebar")
-        self.main_splitter.setSizes([235, 1_000, 365])
+        self.main_splitter.setSizes([205, 1_000, 300])
         self.setCentralWidget(self.main_splitter)
 
     def _restore_workspace_layout(self) -> None:
@@ -1148,7 +1168,7 @@ class WorkbenchWindow(QMainWindow):
         if main_splitter_state is not None:
             self.main_splitter.restoreState(main_splitter_state)
         else:
-            self.main_splitter.setSizes([235, 1_000, 365])
+            self.main_splitter.setSizes([205, 1_000, 300])
         inspector_index = self._ui_settings.value("layout/inspector_tab", 0, type=int)
         if 0 <= inspector_index < self.inspector_tabs.count():
             self.inspector_tabs.setCurrentIndex(inspector_index)
@@ -1190,7 +1210,7 @@ class WorkbenchWindow(QMainWindow):
         for panel, action in self._panel_actions.items():
             panel.show()
             action.setChecked(True)
-        self.main_splitter.setSizes([235, 1_000, 365])
+        self.main_splitter.setSizes([205, 1_000, 300])
         self.inspector_tabs.setCurrentWidget(self.palette_panel)
         self.show_source_candidates_action.setChecked(False)
         self.canvas.set_source_candidate_visibility(False)
@@ -3036,20 +3056,52 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
         self.console.appendPlainText(message)
 
     def _apply_theme(self, *, persist: bool = True) -> None:
+        """Apply the theme at application scope so every dock and child widget follows it."""
         theme = "dark" if self._dark_theme else "light"
-        self.setStyleSheet(stylesheet_for_theme(theme))
+        semantic = palette_for_theme(theme)
+        application = QApplication.instance()
+        if application is not None:
+            palette = QPalette()
+            role_colors = {
+                QPalette.ColorRole.Window: semantic.window,
+                QPalette.ColorRole.WindowText: semantic.text,
+                QPalette.ColorRole.Base: semantic.input,
+                QPalette.ColorRole.AlternateBase: semantic.panel_elevated,
+                QPalette.ColorRole.ToolTipBase: semantic.panel_elevated,
+                QPalette.ColorRole.ToolTipText: semantic.text,
+                QPalette.ColorRole.Text: semantic.text,
+                QPalette.ColorRole.Button: semantic.panel_elevated,
+                QPalette.ColorRole.ButtonText: semantic.text,
+                QPalette.ColorRole.Highlight: semantic.selection,
+                QPalette.ColorRole.HighlightedText: semantic.selection_text,
+                QPalette.ColorRole.Link: semantic.accent,
+            }
+            for role, color in role_colors.items():
+                palette.setColor(role, QColor(color))
+            application.setPalette(palette)
+            application.setStyleSheet(stylesheet_for_theme(theme))
         if hasattr(self, "canvas"):
             self.canvas.set_visual_theme(theme)
         if hasattr(self, "theme_action"):
-            self.theme_action.setText(
-                "Use Light Theme" if self._dark_theme else "Use Dark Theme"
+            self.theme_action.setText("Dark mode")
+            self.theme_action.setChecked(self._dark_theme)
+            self.theme_action.setIcon(
+                self._awesome_icon(
+                    "fa5s.moon" if self._dark_theme else "fa5s.sun",
+                    QStyle.StandardPixmap.SP_DialogHelpButton,
+                )
+            )
+            self.theme_action.setToolTip(
+                "Dark workbench shell is active"
+                if self._dark_theme
+                else "Light workbench shell is active"
             )
         if persist:
             self._ui_settings.setValue("appearance/theme", theme)
             self._ui_settings.sync()
 
-    def _toggle_theme(self) -> None:
-        self._dark_theme = not self._dark_theme
+    def _toggle_theme(self, checked: bool | None = None) -> None:
+        self._dark_theme = not self._dark_theme if checked is None else bool(checked)
         self._apply_theme(persist=True)
 
     def _about(self) -> None:

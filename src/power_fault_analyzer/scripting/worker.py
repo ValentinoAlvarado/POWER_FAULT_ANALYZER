@@ -13,12 +13,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-from power_fault_analyzer.infrastructure.persistence.json_network_document_repository import JSONNetworkDocumentRepository
-from power_fault_analyzer.scripting.project import ScriptProject
 from power_fault_analyzer.domain.enums.bus_kind import BusKind
 from power_fault_analyzer.domain.enums.equipment_family import EquipmentFamily
 from power_fault_analyzer.domain.enums.switching_device import SwitchingDeviceKind, SwitchPosition
-
+from power_fault_analyzer.infrastructure.persistence.json_network_document_repository import (
+    JSONNetworkDocumentRepository,
+)
+from power_fault_analyzer.scripting.project import ScriptProject
 
 _ALLOWED_BUILTINS = {
     "abs": abs, "all": all, "any": any, "bool": bool, "complex": complex,
@@ -45,9 +46,12 @@ def validate_script_policy(source: str) -> None:
             raise ScriptPolicyError("Dunder names are not available in the automation API.")
         if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
             raise ScriptPolicyError("Dunder attribute access is not available in the automation API.")
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id in {"open", "exec", "eval", "compile", "__import__"}:
-                raise ScriptPolicyError(f"Call to {node.func.id!r} is not permitted.")
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in {"open", "exec", "eval", "compile", "__import__"}
+        ):
+            raise ScriptPolicyError(f"Call to {node.func.id!r} is not permitted.")
 
 
 def execute_request(request: dict) -> dict:
@@ -65,7 +69,9 @@ def execute_request(request: dict) -> dict:
     }
     captured = io.StringIO()
     with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
-        exec(compile(source, "<PFA Code & Automation Worker>", "exec"), namespace, namespace)
+        exec(  # noqa: S102 - intentional execution of user-authored scripts in the worker process
+            compile(source, "<PFA Code & Automation Worker>", "exec"), namespace, namespace
+        )
     project = namespace.get("project")
     if not isinstance(project, ScriptProject):
         raise TypeError("Script must create a ScriptProject instance named 'project'.")
@@ -87,7 +93,8 @@ def main() -> int:
         result = execute_request(request)
         sys.stdout.write(json.dumps(result, allow_nan=False))
         return 0
-    except Exception as exc:  # protocol boundary: serialize a concise failure
+    # Serialize any ordinary script/runtime exception into the worker protocol.
+    except Exception as exc:  # noqa: BLE001 - protocol boundary for arbitrary script failures
         sys.stdout.write(json.dumps({"ok": False, "error_type": type(exc).__name__,
                                      "error": str(exc)}, allow_nan=False))
         return 1

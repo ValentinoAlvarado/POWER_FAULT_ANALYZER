@@ -311,7 +311,7 @@ def test_schema_13_roundtrip_preserves_line_transformer_and_source_evidence(tmp_
     workspace, _, _ = _resolve_complete_workspace()
     path = JSONNetworkDocumentRepository().save(workspace, tmp_path / "pfa-es002.json")
     payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "1.5"
+    assert payload["schema_version"] == "1.6"
 
     loaded = JSONNetworkDocumentRepository().load(path)
     equipment_by_id = {item.id: item for item in loaded.network.equipment}

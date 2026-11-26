@@ -6,10 +6,10 @@ not inferred from geometry: callers must provide explicit terminal coordinates.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from math import cos, floor, isfinite, radians, sin
-from typing import Iterable, Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +114,42 @@ def snap_value(value: float, spacing: float) -> float:
 
 def snap_point(point: Point, spacing: float) -> Point:
     return Point(snap_value(point.x, spacing), snap_value(point.y, spacing))
+
+
+def select_straight_bus_taps(
+    terminal_axis_offsets: Sequence[tuple[str, float]],
+    *,
+    minimum_separation: float = 18.0,
+    tolerance: float = 1e-7,
+) -> frozenset[str]:
+    """Select all bus taps for straight drops only when none would collide.
+
+    A selected bus group may use the orthogonal projection of each terminal
+    onto the bus axis, producing straight bus-normal conductors. If any pair
+    of projected tap positions is too close, the caller must retain the
+    precomputed bay offsets for the entire bus group. This all-or-none policy
+    prevents a direct tap from colliding with a neighboring reserved bay.
+    """
+    if (not isfinite(minimum_separation) or minimum_separation <= 0
+            or not isfinite(tolerance) or tolerance <= 0):
+        raise ValueError("Tap separation and tolerance must be finite and positive.")
+    identifiers: set[str] = set()
+    normalized: list[tuple[str, float]] = []
+    for identifier, offset in terminal_axis_offsets:
+        if not identifier or identifier in identifiers:
+            raise ValueError("Terminal tap identifiers must be non-empty and unique.")
+        if not isfinite(offset):
+            raise ValueError("Terminal tap offsets must be finite.")
+        identifiers.add(identifier)
+        normalized.append((identifier, float(offset)))
+
+    for index, (_, offset) in enumerate(normalized):
+        if any(
+            abs(offset - other_offset) < minimum_separation - tolerance
+            for _, other_offset in normalized[index + 1 :]
+        ):
+            return frozenset()
+    return frozenset(identifiers)
 
 
 def orthogonal_route(

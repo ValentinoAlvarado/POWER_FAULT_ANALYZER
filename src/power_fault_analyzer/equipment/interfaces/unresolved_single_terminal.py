@@ -1,12 +1,18 @@
 """Single-terminal placeholder for equipment with unresolved technical data."""
 from __future__ import annotations
+
 from uuid import UUID
+
 from power_fault_analyzer.domain.entities.electrical_equipment import ElectricalEquipmentBase
 from power_fault_analyzer.domain.entities.terminal import Terminal
 from power_fault_analyzer.domain.enums.equipment_family import EquipmentFamily
-from power_fault_analyzer.domain.value_objects.diagnostic import DiagnosticSeverity, DomainDiagnostic
-from .unresolved_equipment import EngineeringParameter
 from power_fault_analyzer.domain.enums.equipment_interface import ParameterEvidenceStatus
+from power_fault_analyzer.domain.value_objects.diagnostic import (
+    DiagnosticSeverity,
+    DomainDiagnostic,
+)
+
+from .unresolved_equipment import EngineeringParameter
 
 
 class UnresolvedSingleTerminalEquipment(ElectricalEquipmentBase):

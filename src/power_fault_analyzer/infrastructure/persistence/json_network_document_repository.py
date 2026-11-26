@@ -64,12 +64,16 @@ from power_fault_analyzer.domain.value_objects.tap_changer import TapChanger
 from power_fault_analyzer.domain.value_objects.transformer_winding import TransformerWinding
 from power_fault_analyzer.domain.value_objects.vector_group import VectorGroup
 from power_fault_analyzer.domain.value_objects.voltage import Voltage
+from power_fault_analyzer.equipment.interfaces.unresolved_branch import (
+    UnresolvedTwoTerminalEquipment,
+)
 from power_fault_analyzer.equipment.interfaces.unresolved_equipment import (
     EngineeringParameter,
     UnresolvedEquipmentInterface,
 )
-from power_fault_analyzer.equipment.interfaces.unresolved_branch import UnresolvedTwoTerminalEquipment
-from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import UnresolvedSingleTerminalEquipment
+from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import (
+    UnresolvedSingleTerminalEquipment,
+)
 from power_fault_analyzer.equipment.sources.equivalent_source import EquivalentSource
 from power_fault_analyzer.equipment.sources.synchronous_generator import SynchronousGenerator
 from power_fault_analyzer.equipment.switching.switching_device import SwitchingDevice
@@ -78,6 +82,7 @@ from power_fault_analyzer.equipment.transformers.two_winding_transformer import 
 )
 from power_fault_analyzer.equipment.transmission.line import Line
 from power_fault_analyzer.equipment.transmission.line_parameters import LineParameters
+from power_fault_analyzer.operations.models import OperatingScenario
 
 
 class NetworkDocumentError(ValueError):
@@ -85,8 +90,8 @@ class NetworkDocumentError(ValueError):
 
 
 class JSONNetworkDocumentRepository(NetworkDocumentRepositoryPort):
-    SCHEMA_VERSION = "1.5"
-    SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4", SCHEMA_VERSION})
+    SCHEMA_VERSION = "1.6"
+    SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", SCHEMA_VERSION})
 
     def load(self, path: str | Path) -> NetworkWorkspace:
         source = Path(path)
@@ -146,7 +151,7 @@ class JSONNetworkDocumentRepository(NetworkDocumentRepositoryPort):
                     x=float(item["x"]),
                     y=float(item["y"]),
                     anchor=item.get("anchor", "middle"),
-                    font_family=item.get("font_family", "STIX Two Text"),
+                    font_family=item.get("font_family", "Segoe UI"),
                     size_pt=float(item.get("size_pt", 7.5)),
                     weight=item.get("weight", "normal"),
                     color=item.get("color", "#172033"),
@@ -171,6 +176,17 @@ class JSONNetworkDocumentRepository(NetworkDocumentRepositoryPort):
                 snap_enabled=bool(payload.get("diagram", {}).get("snap_enabled", True)),
                 study_history=tuple(
                     _study_from_dict(item) for item in payload.get("study_history", [])
+                ),
+                operating_scenarios={
+                    scenario.scenario_id: scenario
+                    for scenario in (
+                        OperatingScenario.from_dict(item)
+                        for item in payload.get("operations", {}).get("scenarios", [])
+                    )
+                },
+                active_operating_scenario_id=(
+                    UUID(payload["operations"]["active_scenario_id"])
+                    if payload.get("operations", {}).get("active_scenario_id") else None
                 ),
             )
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
@@ -203,6 +219,18 @@ class JSONNetworkDocumentRepository(NetworkDocumentRepositoryPort):
                 ],
             },
             "study_history": [_study_to_dict(item) for item in workspace.study_history],
+            "operations": {
+                "scenarios": [
+                    item.to_dict()
+                    for item in sorted(
+                        workspace.operating_scenarios.values(), key=lambda value: str(value.scenario_id)
+                    )
+                ],
+                "active_scenario_id": (
+                    str(workspace.active_operating_scenario_id)
+                    if workspace.active_operating_scenario_id else None
+                ),
+            },
             "diagram": {
                 "positions": {
                     str(identifier): [float(position[0]), float(position[1])]

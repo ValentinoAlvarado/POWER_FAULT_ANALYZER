@@ -1,6 +1,16 @@
 from power_fault_analyzer.diagram import (
-    LayoutEdge, LayoutNode, Point, Rect, SvgLabel, SvgMetadata, SvgPath, SvgSymbol,
-    layout_topology, render_svg, route_orthogonal_avoiding, snap_to_terminal,
+    LayoutEdge,
+    LayoutNode,
+    Point,
+    Rect,
+    SvgLabel,
+    SvgMetadata,
+    SvgPath,
+    SvgSymbol,
+    layout_topology,
+    render_svg,
+    route_orthogonal_avoiding,
+    snap_to_terminal,
 )
 
 

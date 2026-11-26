@@ -1,45 +1,24 @@
-# Desktop distribution and public releases
+# Desktop distribution and public release page
 
-POWER_FAULT_ANALYZER is a native Windows x64 desktop engineering application. The public website in `website/` is the download and documentation front door.
+PFA remains a desktop engineering application. The public website is its distribution and documentation front door; it is not a replacement for the engineering editor.
 
-## License
+## Windows package
 
-PFA original code is released under **GPL-3.0-or-later**. Third-party dependencies and assets retain independent licenses. The combined PySide6 Community Edition application selects the GPLv3-compatible licensing route. QElectroTech Elements remain CC BY 3.0. See `LICENSE`, `NOTICE.md`, `LICENSES/` and `docs/engineering/THIRD_PARTY_LICENSE_REGISTER.md`.
+- The product is distributed as an install-free, standalone Windows x64 desktop folder in a ZIP archive. The website is its download/documentation front door; the engineering editor remains a native desktop application.
+- Python 3.13 x64 is the release build toolchain.
+- The release workflow installs the `desktop`, `reports` and `release` extras.
+- The pinned QElectroTech symbol seed is acquired and hash-verified before packaging.
+- PyInstaller builds an `onedir` application because the Qt plugin/runtime tree is more diagnosable than a one-file executable.
+- The release asset is `PFA-Windows-x64.zip`; it includes the executable, runtime dependencies, source symbol collection, attribution/license notices, and SHA-256 checksum. It is a portable `onedir` ZIP, not an MSI installer; extract the archive and launch `POWER_FAULT_ANALYZER.exe`.
+- A release is published only from a `v*` tag after lint, formatting, compile, tests and QET/Qt smoke checks pass.
+- **Publication is currently license-blocked:** the repository root `LICENSE` file is empty. Do not publish a public binary or describe the application as OSI-licensed open source until the project selects and commits a license and the Qt/PySide6 redistribution obligations are reviewed. QElectroTech element assets retain their separate CC BY 3.0 attribution and terms.
 
-## Windows release assets
+## Website deployment
 
-Each successful tagged Windows workflow publishes:
+1. Publish the repository to GitHub.
+2. Edit `website/index.html` and replace `YOUR_GITHUB_OWNER/POWER_FAULT_ANALYZER` with the exact public owner/repository slug.
+3. Enable GitHub Pages with **GitHub Actions** as the build/deployment source.
+4. Push to `main` to deploy the download page.
+5. Create a version tag such as `v0.2.0` to run the verified Windows build and publish the release ZIP.
 
-- `PFA-Setup-x64.exe`: per-user Windows installer built with NSIS; no administrator elevation is required.
-- `PFA-Windows-x64.zip`: portable PyInstaller onedir distribution.
-- `SHA256SUMS.txt`: SHA-256 checksums for all principal release assets.
-- `SBOM.cdx.json`: CycloneDX 1.6 inventory of Python distributions resolved in the release build environment.
-- `PYTHON-DEPENDENCY-LICENSES.md`: license metadata for the exact build environment; `NOASSERTION` entries require review.
-- `THIRD_PARTY_NOTICES.md` and `BUILD-INFO.json`.
-
-Python 3.13 x64 is the release toolchain. The release workflow acquires the pinned QElectroTech seed, runs the complete test/Qt acceptance gate, builds the standalone application with PyInstaller, then compiles the setup executable with NSIS using the zlib compressor.
-
-## Publish the repository and website
-
-Run `PUBLISH_TO_GITHUB.ps1` from the repository root after installing Git for Windows and GitHub CLI and authenticating with `gh auth login`. It creates the public repository `ValentinoAlvarado/POWER_FAULT_ANALYZER`, pushes `main`, sets repository metadata and attempts to enable Pages for GitHub Actions. If Pages cannot be enabled by API, set **Settings → Pages → Build and deployment → Source → GitHub Actions**.
-
-Website: `https://valentinoalvarado.github.io/POWER_FAULT_ANALYZER/`. The download button activates only when a published release contains `PFA-Setup-x64.exe` and `SHA256SUMS.txt`.
-
-## First preview release
-
-After the initial `main` push and Pages deployment succeed, create and push a preview tag:
-
-```powershell
-git tag -a v0.1.0-beta.1 -m "POWER_FAULT_ANALYZER preview release"
-git push origin v0.1.0-beta.1
-```
-
-The tag starts `.github/workflows/windows-release.yml`. The workflow creates a GitHub prerelease only if the Windows build and acceptance gates succeed. The download page detects the resulting installer automatically.
-
-## Signing and SmartScreen
-
-The first installer is unsigned. Windows may show an unknown-publisher or SmartScreen warning. Do not claim a signed publisher or SmartScreen reputation until a code-signing certificate and protected signing workflow are configured.
-
-## Engineering scope
-
-The public page and release notes must preserve the limits described in `docs/product/PFA_PRODUCT_READINESS_2026-11-25.md`: no full IEC 60909 compliance, AC/DC load flow, OPF, N-1 studies or complete end-to-end support for every equipment category is claimed.
+The download page queries the latest GitHub Release and enables the download only if the expected ZIP asset exists. Until a repository slug and public release are configured, it deliberately shows a non-download state instead of a broken or invented link.

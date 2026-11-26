@@ -118,7 +118,7 @@ def test_pfa_es001_json_round_trip_preserves_switches_interfaces_and_symbol_pin_
     payload = json.loads(path.read_text(encoding="utf-8"))
     loaded = repository.load(path)
 
-    assert payload["schema_version"] == "1.5"
+    assert payload["schema_version"] == "1.6"
     assert len(loaded.network.buses) == 8
     assert len(loaded.network.equipment) == 10
     assert len(loaded.diagram_symbols) == 10
@@ -146,13 +146,13 @@ def test_pfa_es001_json_round_trip_preserves_switches_interfaces_and_symbol_pin_
     )
 
 
-def test_network_document_writer_uses_schema_1_2_and_keeps_schema_1_0_readable(
+def test_network_document_writer_uses_schema_1_6_and_keeps_schema_1_0_readable(
     tmp_path: Path,
 ) -> None:
     workspace = BuildPFAES001Substation().execute().workspace
     path = JSONNetworkDocumentRepository().save(workspace, tmp_path / "substation.pfan")
     payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "1.5"
+    assert payload["schema_version"] == "1.6"
 
     payload["schema_version"] = "1.0"
     for bus in payload["network"]["buses"]:

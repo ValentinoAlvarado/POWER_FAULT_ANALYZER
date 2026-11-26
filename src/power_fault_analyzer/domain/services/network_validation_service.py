@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from power_fault_analyzer.domain.interfaces.network_contracts import NetworkAggregate
 from power_fault_analyzer.domain.enums.source_sequence_status import SourceSequenceStatus
-from power_fault_analyzer.equipment.interfaces.unresolved_branch import UnresolvedTwoTerminalEquipment
-from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import UnresolvedSingleTerminalEquipment
-from power_fault_analyzer.equipment.sources.equivalent_source import EquivalentSource
+from power_fault_analyzer.domain.interfaces.network_contracts import NetworkAggregate
 from power_fault_analyzer.domain.value_objects.diagnostic import (
     DiagnosticSeverity,
     DomainDiagnostic,
 )
+from power_fault_analyzer.equipment.interfaces.unresolved_branch import (
+    UnresolvedTwoTerminalEquipment,
+)
+from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import (
+    UnresolvedSingleTerminalEquipment,
+)
+from power_fault_analyzer.equipment.sources.equivalent_source import EquivalentSource
 
 
 class DefaultNetworkValidationService:

@@ -4,11 +4,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from .layout import Point, Rect
+from .layout import Rect
 from .model_projection import DiagramDocument, EngineeringLabel, _rotated_bounds
 from .svg_export import SvgLabel, SvgMetadata, SvgPath, SvgSymbol, render_svg
 from .symbol_catalog import get_symbol_definition
-
 
 JOURNAL_PRESETS_MM: dict[str, tuple[float, float]] = {
     "single-column": (88.0, 62.0),
@@ -24,7 +23,7 @@ def _as_svg_label(label: EngineeringLabel, index: int) -> SvgLabel:
         label.size_pt,
         label.anchor,
         str(label.label_id or f"label-{index}"),
-        f"{label.font_family}, Cambria, Times New Roman, serif",
+        f"{label.font_family}, Arial, Helvetica, sans-serif",
         label.weight,
         label.color,
         label.rotation_deg,

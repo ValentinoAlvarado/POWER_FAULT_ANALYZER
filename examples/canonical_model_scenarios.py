@@ -6,6 +6,7 @@ explicitly unresolved; they are topology-bearing placeholders and are not
 calculation-ready numerical models.
 """
 from __future__ import annotations
+
 from uuid import uuid4
 
 from power_fault_analyzer.application.use_cases.network_workspace import NetworkWorkspace
@@ -16,11 +17,16 @@ from power_fault_analyzer.domain.enums.bus_kind import BusKind
 from power_fault_analyzer.domain.enums.equipment_family import EquipmentFamily
 from power_fault_analyzer.domain.enums.equipment_interface import ParameterEvidenceStatus
 from power_fault_analyzer.domain.enums.switching_device import SwitchingDeviceKind, SwitchPosition
-from power_fault_analyzer.domain.value_objects.frequency import Frequency
 from power_fault_analyzer.domain.value_objects.voltage import Voltage
-from power_fault_analyzer.equipment.interfaces.unresolved_equipment import EngineeringParameter, UnresolvedEquipmentInterface
-from power_fault_analyzer.equipment.interfaces.unresolved_branch import UnresolvedTwoTerminalEquipment
-from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import UnresolvedSingleTerminalEquipment
+from power_fault_analyzer.equipment.interfaces.unresolved_branch import (
+    UnresolvedTwoTerminalEquipment,
+)
+from power_fault_analyzer.equipment.interfaces.unresolved_equipment import (
+    EngineeringParameter,
+)
+from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import (
+    UnresolvedSingleTerminalEquipment,
+)
 from power_fault_analyzer.equipment.switching.switching_device import SwitchingDevice
 
 

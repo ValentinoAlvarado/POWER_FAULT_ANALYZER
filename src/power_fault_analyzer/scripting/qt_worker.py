@@ -1,5 +1,6 @@
 """Qt asynchronous controller for the isolated PFA script worker."""
 from __future__ import annotations
+
 import json
 import os
 import sys
@@ -7,7 +8,10 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
-from power_fault_analyzer.infrastructure.persistence.json_network_document_repository import JSONNetworkDocumentRepository
+
+from power_fault_analyzer.infrastructure.persistence.json_network_document_repository import (
+    JSONNetworkDocumentRepository,
+)
 
 
 class ScriptWorkerController(QObject):

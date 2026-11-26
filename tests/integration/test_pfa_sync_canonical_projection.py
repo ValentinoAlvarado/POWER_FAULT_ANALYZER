@@ -1,22 +1,22 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from examples.canonical_model_scenarios import (
-    build_double_bus_substation, build_multibus_network, build_single_bus_substation,
+    build_double_bus_substation,
+    build_multibus_network,
+    build_single_bus_substation,
 )
 from power_fault_analyzer.diagram.model_document_export import render_engineering_svg
 from power_fault_analyzer.diagram.model_projection import (
-    DiagramProjectionError, project_network_to_diagram, validate_diagram_document,
+    DiagramProjectionError,
+    project_network_to_diagram,
+    validate_diagram_document,
 )
-from power_fault_analyzer.domain.enums.equipment_family import EquipmentFamily
 from power_fault_analyzer.infrastructure.persistence.json_network_document_repository import (
     JSONNetworkDocumentRepository,
 )
-from power_fault_analyzer.scripting.worker_client import run_script_worker, ScriptWorkerError
+from power_fault_analyzer.scripting.worker_client import ScriptWorkerError, run_script_worker
 
 
 @pytest.mark.parametrize("builder", [
@@ -122,6 +122,7 @@ def test_persisted_equipment_label_and_placement_are_used_by_projection(tmp_path
 
 def test_async_script_worker_can_be_cancelled_by_timeout():
     import asyncio
+
     from power_fault_analyzer.scripting.worker_client import run_script_worker_async
 
     async def exercise():
@@ -134,7 +135,9 @@ def test_async_script_worker_can_be_cancelled_by_timeout():
 
 
 def test_topology_placeholders_and_incomplete_source_sequences_block_studies():
-    from power_fault_analyzer.domain.services.network_validation_service import DefaultNetworkValidationService
+    from power_fault_analyzer.domain.services.network_validation_service import (
+        DefaultNetworkValidationService,
+    )
     workspace = build_single_bus_substation()
     diagnostics = DefaultNetworkValidationService().validate_for_calculation(workspace.network)
     error_codes = {item.code for item in diagnostics if item.severity.value == "error"}
@@ -148,7 +151,10 @@ def test_topology_placeholders_and_incomplete_source_sequences_block_studies():
 
 
 def test_canonical_svg_and_pdf_are_vector_exports_with_technical_switch_symbol(tmp_path):
-    from power_fault_analyzer.diagram.model_document_export import export_engineering_pdf, export_engineering_svg
+    from power_fault_analyzer.diagram.model_document_export import (
+        export_engineering_pdf,
+        export_engineering_svg,
+    )
     workspace = build_single_bus_substation()
     document = project_network_to_diagram(workspace)
     svg_path = export_engineering_svg(document, tmp_path / "single-bus.svg",

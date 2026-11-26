@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from itertools import pairwise
+
 import pytest
 
 from power_fault_analyzer.diagram.layout import (
@@ -11,6 +13,8 @@ from power_fault_analyzer.diagram.layout import (
     avoid_label_collisions,
     layout_rows,
     orthogonal_route,
+    perpendicular_bay_route,
+    select_straight_bus_taps,
     snap_point,
 )
 
@@ -22,7 +26,7 @@ def test_snap_point_uses_configured_grid() -> None:
 def test_orthogonal_route_preserves_explicit_terminal_endpoints() -> None:
     route = orthogonal_route(Point(10, 20), Point(90, 80))
     assert route == (Point(10, 20), Point(90, 20), Point(90, 80))
-    assert all(a.x == b.x or a.y == b.y for a, b in zip(route, route[1:]))
+    assert all(a.x == b.x or a.y == b.y for a, b in pairwise(route))
 
 
 def test_layout_rows_is_deterministic_and_snapped() -> None:
@@ -59,3 +63,39 @@ def test_invalid_geometry_is_rejected() -> None:
         snap_point(Point(1, 2), 0)
     with pytest.raises(ValueError):
         Rect(0, 0, -1, 2)
+
+
+@pytest.mark.parametrize(
+    ("offsets", "expected"),
+    [
+        ((("T1", 12.0),), {"T1"}),
+        ((("T1", 0.0), ("T2", 40.0)), {"T1", "T2"}),
+        ((("T1", 0.0), ("T2", 12.0)), set()),
+        ((("T1", 0.0), ("T2", 12.0), ("T3", 50.0)), set()),
+    ],
+)
+def test_straight_bus_taps_are_selected_only_without_terminal_collisions(offsets, expected):
+    assert select_straight_bus_taps(offsets, minimum_separation=18.0) == frozenset(expected)
+
+
+def test_straight_bus_tap_rejects_duplicate_ids_and_invalid_offsets():
+    with pytest.raises(ValueError, match="unique"):
+        select_straight_bus_taps((("T1", 0.0), ("T1", 40.0)))
+    with pytest.raises(ValueError, match="finite"):
+        select_straight_bus_taps((("T1", float("inf")),))
+
+
+def test_single_bus_drop_is_one_straight_segment_when_terminal_is_projected_to_bus():
+    bus_tap = Point(812.0, 612.0)
+    equipment_terminal = Point(812.0, 496.0)
+    route = perpendicular_bay_route(bus_tap, equipment_terminal, 0.0)
+    assert route == (bus_tap, equipment_terminal)
+
+
+def test_vertical_bus_also_allows_a_straight_perpendicular_drop():
+    bus_tap = Point(100.0, 200.0)
+    equipment_terminal = Point(220.0, 200.0)
+    assert perpendicular_bay_route(bus_tap, equipment_terminal, 90.0) == (
+        bus_tap,
+        equipment_terminal,
+    )

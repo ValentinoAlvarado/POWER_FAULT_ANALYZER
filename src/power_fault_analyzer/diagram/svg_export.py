@@ -1,14 +1,13 @@
 """Publication-oriented, editable SVG primitives for electrical diagrams."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from math import cos, radians, sin
 from html import escape
-from typing import Iterable
-
-from .symbol_catalog import get_symbol_definition
+from math import cos, radians, sin
 
 from .layout import Point, Rect
+from .symbol_catalog import get_symbol_definition
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,7 +17,7 @@ class SvgLabel:
     size_pt: float = 7.5
     anchor: str = "middle"
     identifier: str = ""
-    font_family: str = "STIX Two Text, Cambria, Times New Roman, serif"
+    font_family: str = "Segoe UI, Arial, Helvetica, sans-serif"
     weight: str = "normal"
     color: str = "#172033"
     rotation_deg: float = 0.0
@@ -126,18 +125,24 @@ def render_svg(
     title = escape(metadata.title)
     description = escape(metadata.description)
     lines = [
-        '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" '
-        f'width="{_f(width_mm)}mm" height="{_f(height_mm)}mm" '
-        f'viewBox="{_f(view_box.x)} {_f(view_box.y)} {_f(view_box.width)} {_f(view_box.height)}">',
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" '
+            f'width="{_f(width_mm)}mm" height="{_f(height_mm)}mm" '
+            f'viewBox="{_f(view_box.x)} {_f(view_box.y)} {_f(view_box.width)} {_f(view_box.height)}">'
+        ),
         f'<title>{title}</title><desc>{description}</desc>',
         '<metadata>',
-        f'<pfa:document xmlns:pfa="https://power-fault-analyzer.org/ns/diagram/1.0" '
-        f'author="{escape(metadata.author, quote=True)}" '
-        f'project="{escape(metadata.project, quote=True)}" '
-        f'revision="{escape(metadata.revision, quote=True)}" />',
+        (
+            f'<pfa:document xmlns:pfa="https://power-fault-analyzer.org/ns/diagram/1.0" '
+            f'author="{escape(metadata.author, quote=True)}" '
+            f'project="{escape(metadata.project, quote=True)}" '
+            f'revision="{escape(metadata.revision, quote=True)}" />'
+        ),
         '</metadata>',
-        f'<rect id="page-background" x="{_f(view_box.x)}" y="{_f(view_box.y)}" '
-        f'width="{_f(view_box.width)}" height="{_f(view_box.height)}" fill="#FFFFFF"/>',
+        (
+            f'<rect id="page-background" x="{_f(view_box.x)}" y="{_f(view_box.y)}" '
+            f'width="{_f(view_box.width)}" height="{_f(view_box.height)}" fill="#FFFFFF"/>'
+        ),
     ]
     if show_grid:
         lines.append('<g id="editor-grid" fill="none" stroke="#E8EDF2" stroke-width="0.25">')
@@ -207,7 +212,7 @@ def render_svg(
             lines.append(
                 f'<text x="0" y="{_f(0.28 * radius)}" text-anchor="middle" '
                 'fill="#172033" stroke="none" '
-                f'font-family="STIX Two Text, Cambria, Times New Roman, serif" '
+                f'font-family="Segoe UI, Arial, Helvetica, sans-serif" '
                 f'font-size="{_f(11.0 * scene_per_pt)}">{glyph}</text>'
             )
         elif symbol.family == "transformer":

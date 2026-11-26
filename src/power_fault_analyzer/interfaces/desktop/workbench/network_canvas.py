@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from uuid import UUID
 
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QFontDatabase,
+    QFontMetricsF,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QFrame,
+    QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsObject,
-    QGraphicsEllipseItem,
     QGraphicsPathItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
@@ -29,27 +39,140 @@ from power_fault_analyzer.application.use_cases.network_workspace import (
     DiagramSymbolPlacement,
     NetworkWorkspace,
 )
-from power_fault_analyzer.domain.enums.bus_kind import BusKind
-from power_fault_analyzer.diagram.layout import Point, perpendicular_bay_route
-from power_fault_analyzer.diagram.symbol_catalog import get_symbol_definition
-from power_fault_analyzer.diagram.model_projection import (
-    EngineeringLabel, DiagramProjectionError, project_network_to_diagram,
+from power_fault_analyzer.diagram.layout import (
+    Point,
+    perpendicular_bay_route,
+    select_straight_bus_taps,
+    snap_point,
 )
+from power_fault_analyzer.diagram.model_projection import (
+    LABEL_SCENE_UNITS_PER_PT,
+    DiagramProjectionError,
+    EngineeringLabel,
+    project_network_to_diagram,
+)
+from power_fault_analyzer.diagram.symbol_catalog import get_symbol_definition
+from power_fault_analyzer.domain.enums.bus_kind import BusKind
 from power_fault_analyzer.equipment.sources.equivalent_source import EquivalentSource
 from power_fault_analyzer.equipment.sources.synchronous_generator import SynchronousGenerator
 from power_fault_analyzer.infrastructure.symbols.qet_elmt import SymbolDefinition
 from power_fault_analyzer.interfaces.desktop.workbench.qet_symbol_item import QETSymbolItem
-from power_fault_analyzer.interfaces.desktop.workbench.design_system import palette_for_theme
+from power_fault_analyzer.operations import analyze_workspace
+from power_fault_analyzer.operations.models import BusOperatingState
 
 ROLE_ELEMENT = 0
 
+# Keep the preferred face first, but never ask Qt to draw with a family that is
+# not installed. Qt may otherwise return a missing-glyph box for every Latin
+# character in offscreen rendering environments.
+_SCENE_FONT_FALLBACKS = (
+    "Segoe UI",
+    "Arial",
+    "Aptos",
+    "Calibri",
+    "Tahoma",
+    "Liberation Sans",
+    "DejaVu Sans",
+    "Noto Sans",
+)
 
-def _snap_graphics_position(point: QPointF, grid_spacing: float) -> QPointF:
-    """Return the nearest grid intersection for an interactive graphics move."""
-    spacing = float(grid_spacing)
-    if not math.isfinite(spacing) or spacing <= 0.0:
-        raise ValueError("grid_spacing must be a finite positive value.")
-    return QPointF(round(point.x() / spacing) * spacing, round(point.y() / spacing) * spacing)
+
+@lru_cache(maxsize=1)
+def _installed_scene_font_families() -> tuple[str, ...]:
+    """Cache the system font inventory; it does not change during a session."""
+    return tuple(QFontDatabase.families())
+
+
+def _resolve_scene_font_family(
+    family: str,
+    available_families: tuple[str, ...] | list[str] | None = None,
+) -> str:
+    """Resolve a requested font to an installed face with Latin glyph coverage.
+
+    ``available_families`` is injectable for deterministic unit tests. The
+    production path queries the current Qt font database at runtime.
+    """
+    families = (
+        _installed_scene_font_families()
+        if available_families is None
+        else tuple(available_families)
+    )
+    by_name = {
+        name.partition(" [")[0].casefold(): name
+        for name in families
+        if isinstance(name, str) and name.strip()
+    }
+    requested = family.strip() if isinstance(family, str) else ""
+    for candidate in (requested, *_SCENE_FONT_FALLBACKS):
+        resolved = by_name.get(candidate.casefold())
+        if resolved is not None:
+            return resolved
+
+    system_family = QFontDatabase.systemFont(
+        QFontDatabase.SystemFont.GeneralFont
+    ).family()
+    return by_name.get(system_family.casefold(), system_family or "Sans Serif")
+
+
+@lru_cache(maxsize=1)
+def _available_label_font_families() -> tuple[str, ...]:
+    """Return a short, useful font menu containing only installed families."""
+    families = _installed_scene_font_families()
+    by_name = {
+        name.partition(" [")[0].casefold(): name
+        for name in families
+        if isinstance(name, str) and name.strip()
+    }
+    preferred = (
+        "Segoe UI",
+        "Arial",
+        "Aptos",
+        "Calibri",
+        "Cambria",
+        "Times New Roman",
+        "STIX Two Text",
+        "Tahoma",
+        "Liberation Sans",
+        "DejaVu Sans",
+        "Noto Sans",
+    )
+    options = tuple(
+        by_name[name.casefold()]
+        for name in preferred
+        if name.casefold() in by_name
+    )
+    if options:
+        return options
+    return (_resolve_scene_font_family(""),)
+
+
+def _scene_font(
+    family: str,
+    size_pt: float,
+    weight: QFont.Weight = QFont.Weight.Normal,
+) -> QFont:
+    """Create a scene-scaled font using a verified installed font family.
+
+    EngineeringLabel sizes are physical points in the document model. The
+    drawing scene uses approximately 2.8 scene units per typographic point;
+    pixel-sized fonts keep the scene geometry deterministic. Resolving the
+    family first prevents the missing-glyph squares seen when STIX Two Text is
+    requested on a machine where that family is not installed.
+    """
+    resolved_family = _resolve_scene_font_family(family)
+    font = QFont(resolved_family)
+    font.setStyleHint(QFont.StyleHint.SansSerif)
+    font.setPixelSize(max(1, round(float(size_pt) * LABEL_SCENE_UNITS_PER_PT)))
+    font.setWeight(weight)
+    return font
+
+
+def _snap_graphics_position(position: QPointF, enabled: bool, spacing: float) -> QPointF:
+    """Apply the workspace's single scene-grid contract to a movable symbol."""
+    if not enabled:
+        return position
+    snapped = snap_point(Point(float(position.x()), float(position.y())), float(spacing))
+    return QPointF(snapped.x, snapped.y)
 
 
 class BusSymbol(QGraphicsObject):
@@ -58,7 +181,8 @@ class BusSymbol(QGraphicsObject):
 
     def __init__(
         self, identifier: UUID, name: str, nominal_kv: float, snap: bool, kind: BusKind,
-        width: float = 600.0, grid_spacing: float = 20.0,
+        width: float = 600.0, operating_state: BusOperatingState | None = None,
+        grounded: bool = False, grid_spacing: float = 20.0,
     ) -> None:
         super().__init__()
         self._initializing = True
@@ -69,6 +193,8 @@ class BusSymbol(QGraphicsObject):
         self.grid_spacing = float(grid_spacing)
         self.kind = kind
         self.width = float(width)
+        self.operating_state = operating_state
+        self.operating_grounded = bool(grounded)
         self._drag_start = QPointF()
         self._dragging = False
         self.setData(ROLE_ELEMENT, ("bus", str(identifier)))
@@ -103,12 +229,22 @@ class BusSymbol(QGraphicsObject):
         del option, widget
         selected = self.isSelected()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        ink = QColor("#B66B12" if selected else "#172033")
+        if selected:
+            ink = QColor("#B66B12")
+        elif self.operating_grounded:
+            ink = QColor("#B91C1C")
+        elif self.operating_state is BusOperatingState.ENERGIZED:
+            ink = QColor("#15803D")
+        elif self.operating_state is BusOperatingState.DEENERGIZED:
+            ink = QColor("#94A3B8")
+        else:
+            ink = QColor("#172033")
         if self.kind is BusKind.BUSBAR:
-            painter.setPen(QPen(ink, 3.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.SquareCap))
+            painter.setPen(QPen(ink, 2.0 * LABEL_SCENE_UNITS_PER_PT,
+                                Qt.PenStyle.SolidLine, Qt.PenCapStyle.SquareCap))
             painter.drawLine(QPointF(-self.width / 2.0, 0.0), QPointF(self.width / 2.0, 0.0))
         else:
-            painter.setPen(QPen(ink, 1.4))
+            painter.setPen(QPen(ink, 0.7 * LABEL_SCENE_UNITS_PER_PT))
             painter.setBrush(QBrush(QColor("#FFFFFF")))
             painter.drawEllipse(QRectF(-4.0, -4.0, 8.0, 8.0))
 
@@ -118,25 +254,24 @@ class BusSymbol(QGraphicsObject):
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        super().mouseReleaseEvent(event)
-        self._dragging = False
-        current = self.pos()
-        if (current - self._drag_start).manhattanLength() > 0.1:
-            self.move_committed.emit(
-                str(self.identifier),
-                self._drag_start.x(),
-                self._drag_start.y(),
-                current.x(),
-                current.y(),
-            )
+        try:
+            super().mouseReleaseEvent(event)
+            current = self.pos()
+            if (current - self._drag_start).manhattanLength() > 0.1:
+                self.move_committed.emit(
+                    str(self.identifier),
+                    self._drag_start.x(),
+                    self._drag_start.y(),
+                    current.x(),
+                    current.y(),
+                )
+        finally:
+            self._dragging = False
 
     def itemChange(self, change, value):
-        if (
-            change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
-            and self.snap
-            and self._dragging
-        ):
-            return _snap_graphics_position(value, self.grid_spacing)
+        if (change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
+                and self._dragging and self.snap):
+            return _snap_graphics_position(value, True, self.grid_spacing)
         if (
             change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged
             and not getattr(self, "_initializing", True)
@@ -155,29 +290,20 @@ class CanonicalEquipmentSymbol(QGraphicsObject):
     move_committed = Signal(str, float, float, float, float)
     label_changed = Signal(str, str)
 
-    def __init__(
-        self,
-        identifier: UUID,
-        name: str,
-        family: str,
-        state: str | None,
-        width: float,
-        height: float,
-        orientation_deg: float = 0.0,
-        label_text: str | None = None,
-        *,
-        snap_enabled: bool = False,
-        grid_spacing: float = 20.0,
-    ) -> None:
+    def __init__(self, identifier: UUID, name: str, family: str, state: str | None,
+                 width: float, height: float, orientation_deg: float = 0.0,
+                 label_text: str | None = None, operating_override: bool = False,
+                 snap_enabled: bool = True, grid_spacing: float = 20.0) -> None:
         super().__init__()
         self._initializing = True
         self.identifier, self.name, self.family, self.state = identifier, name, family, state
         self.width, self.height = width, height
         self.orientation_deg = orientation_deg
-        self._drag_start = QPointF()
-        self._dragging = False
+        self.operating_override = bool(operating_override)
         self.snap_enabled = bool(snap_enabled)
         self.grid_spacing = float(grid_spacing)
+        self._drag_start = QPointF()
+        self._dragging = False
         self.setData(ROLE_ELEMENT, ("equipment", str(identifier)))
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable
                       | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
@@ -191,15 +317,23 @@ class CanonicalEquipmentSymbol(QGraphicsObject):
         # Account for the rotated local glyph so winding arcs and terminal leads
         # remain inside the QGraphicsItem scene bounds.
         angle = math.radians(self.orientation_deg)
+        # Some switching marks extend beyond the nominal equipment envelope.
+        # Include their full scene-space geometry so QGraphicsView does not clip
+        # them and itemsBoundingRect()/fitInView sees the real visual extent.
+        switch_extension = {
+            "circuit_breaker": 3.2 * LABEL_SCENE_UNITS_PER_PT,
+            "disconnector": 4.5 * LABEL_SCENE_UNITS_PER_PT,
+            "earthing_switch": 11.0 * LABEL_SCENE_UNITS_PER_PT,
+        }.get(self.family, 8.0)
+        local_half_width = self.width / 2.0 + max(8.0, switch_extension)
+        local_half_height = self.height / 2.0 + 8.0
         half_width = (
-            abs(math.cos(angle)) * self.width / 2.0
-            + abs(math.sin(angle)) * self.height / 2.0
-            + 8.0
+            abs(math.cos(angle)) * local_half_width
+            + abs(math.sin(angle)) * local_half_height
         )
         half_height = (
-            abs(math.sin(angle)) * self.width / 2.0
-            + abs(math.cos(angle)) * self.height / 2.0
-            + 8.0
+            abs(math.sin(angle)) * local_half_width
+            + abs(math.cos(angle)) * local_half_height
         )
         return QRectF(-half_width, -half_height, 2.0 * half_width, 2.0 * half_height)
 
@@ -207,10 +341,11 @@ class CanonicalEquipmentSymbol(QGraphicsObject):
         del option, widget
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         selected = self.isSelected()
-        ink = QColor("#D97706" if selected else "#172033")
+        ink = QColor("#D97706" if selected else "#2563EB" if self.operating_override else "#172033")
+        scene_scale = LABEL_SCENE_UNITS_PER_PT
         painter.save()
         painter.rotate(self.orientation_deg)
-        painter.setPen(QPen(ink, 1.8))
+        painter.setPen(QPen(ink, 0.7 * scene_scale))
         painter.setBrush(QBrush(QColor("#FFFFFF")))
         if self.family == "transformer":
             # Renderer-neutral parametric primitives are shared with SVG/PDF.
@@ -225,56 +360,97 @@ class CanonicalEquipmentSymbol(QGraphicsObject):
                     x1, y1, x2, y2 = primitive.coordinates
                     painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
         elif self.family in {"circuit_breaker", "disconnector", "earthing_switch"}:
-            left, right = -self.width/2, self.width/2
-            painter.drawEllipse(QPointF(left, 0), 2.4, 2.4)
-            painter.drawEllipse(QPointF(right, 0), 2.4, 2.4)
-            if self.state == "closed":
-                painter.drawLine(QPointF(left, 0), QPointF(right, 0))
-            else:
-                painter.drawLine(QPointF(left, 0), QPointF(2, -self.height*0.22))
-            # IEC 60617 candidate function marks: cross for circuit-breaker,
-            # transverse bar for disconnector. Catalogue remains NOT_VERIFIED.
-            mark_y = -self.height * 0.43
+            left, right = -self.width / 2.0, self.width / 2.0
+            contact_radius = 2.0 * scene_scale
+            painter.setBrush(QBrush(ink))
+            painter.drawEllipse(QPointF(left, 0), contact_radius, contact_radius)
+            painter.drawEllipse(QPointF(right, 0), contact_radius, contact_radius)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+
             if self.family == "circuit_breaker":
-                radius = 3.2
-                painter.drawLine(QPointF(right-radius, mark_y-radius),
-                                 QPointF(right+radius, mark_y+radius))
-                painter.drawLine(QPointF(right-radius, mark_y+radius),
-                                 QPointF(right+radius, mark_y-radius))
+                if self.state == "closed":
+                    painter.setPen(QPen(ink, 1.55 * scene_scale))
+                    painter.drawLine(QPointF(left, 0), QPointF(right, 0))
+                else:
+                    painter.setPen(QPen(ink, 1.15 * scene_scale))
+                    painter.drawLine(QPointF(left, 0), QPointF(2.0, -self.height * 0.32))
+                # IEC candidate mark; normative status remains NOT_VERIFIED.
+                painter.setPen(QPen(ink, 0.7 * scene_scale))
+                mark_y = -self.height * 0.43
+                radius = 3.2 * scene_scale
+                painter.drawLine(QPointF(right - radius, mark_y - radius),
+                                 QPointF(right + radius, mark_y + radius))
+                painter.drawLine(QPointF(right - radius, mark_y + radius),
+                                 QPointF(right + radius, mark_y - radius))
             elif self.family == "disconnector":
-                painter.drawLine(QPointF(right-4.5, mark_y), QPointF(right+4.5, mark_y))
-            elif self.family == "earthing_switch":
+                blade_end = right if self.state == "closed" else 3.0
+                blade_y = 0.0 if self.state == "closed" else -self.height * 0.34
+                painter.drawLine(QPointF(left, 0), QPointF(blade_end, blade_y))
+                mark_y = -self.height * 0.43
+                mark_half = 4.5 * scene_scale
+                painter.drawLine(QPointF(right - mark_half, mark_y),
+                                 QPointF(right + mark_half, mark_y))
+            else:
+                blade_end = right if self.state == "closed" else 3.0
+                blade_y = 0.0 if self.state == "closed" else -self.height * 0.34
+                painter.drawLine(QPointF(left, 0), QPointF(blade_end, blade_y))
                 ground_y = self.height * 0.28
-                painter.drawLine(QPointF(right+7.0, -ground_y), QPointF(right+7.0, -ground_y/2))
-                painter.drawLine(QPointF(right+2.0, -ground_y/2), QPointF(right+12.0, -ground_y/2))
-                painter.drawLine(QPointF(right+4.0, 0), QPointF(right+10.0, 0))
+                ground_x = right + 6.0 * scene_scale
+                painter.drawLine(QPointF(ground_x, -ground_y),
+                                 QPointF(ground_x, -ground_y / 2.0))
+                painter.drawLine(QPointF(ground_x - 5.0 * scene_scale, -ground_y / 2.0),
+                                 QPointF(ground_x + 5.0 * scene_scale, -ground_y / 2.0))
+                painter.drawLine(QPointF(ground_x - 3.5 * scene_scale, 0),
+                                 QPointF(ground_x + 3.5 * scene_scale, 0))
         elif self.family in {"generator", "source"}:
-            painter.drawEllipse(QRectF(-20, -20, 40, 40))
+            radius = min(self.width, self.height) * 0.44
+            painter.drawEllipse(QPointF(0.0, 0.0), radius, radius)
             glyph = "G" if self.family == "generator" else "~"
-            painter.drawText(QRectF(-16, -15, 32, 30), Qt.AlignmentFlag.AlignCenter, glyph)
+            painter.setPen(QPen(ink, 0.7 * scene_scale))
+            font = _scene_font("STIX Two Text", 11.0, QFont.Weight.DemiBold)
+            painter.setFont(font)
+            metrics = QFontMetricsF(font)
+            painter.drawText(
+                QPointF(-metrics.horizontalAdvance(glyph) / 2.0, 0.28 * radius),
+                glyph,
+            )
         else:
-            painter.drawEllipse(QRectF(-18, -18, 36, 36))
+            # The unresolved/generic symbol is a rectangle with an explicit
+            # question mark, matching the canonical vector renderer.
+            painter.drawRect(QRectF(-self.width / 2.0, -self.height / 2.0,
+                                    self.width, self.height))
+            painter.setPen(QPen(ink, 0.7 * scene_scale))
+            font = _scene_font("STIX Two Text", 6.0, QFont.Weight.Normal)
+            painter.setFont(font)
+            metrics = QFontMetricsF(font)
+            painter.drawText(
+                QPointF(-metrics.horizontalAdvance("?") / 2.0,
+                        3.0 * scene_scale),
+                "?",
+            )
         painter.restore()
+
     def mousePressEvent(self, event) -> None:
         self._drag_start = self.pos()
         self._dragging = True
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        super().mouseReleaseEvent(event)
-        self._dragging = False
-        current = self.pos()
-        if (current-self._drag_start).manhattanLength() > 0.1:
-            self.move_committed.emit(str(self.identifier), self._drag_start.x(),
-                self._drag_start.y(), current.x(), current.y())
+        try:
+            super().mouseReleaseEvent(event)
+            current = self.pos()
+            if (current-self._drag_start).manhattanLength() > 0.1:
+                self.move_committed.emit(
+                    str(self.identifier), self._drag_start.x(), self._drag_start.y(),
+                    current.x(), current.y(),
+                )
+        finally:
+            self._dragging = False
 
     def itemChange(self, change, value):
-        if (
-            change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
-            and self.snap_enabled
-            and self._dragging
-        ):
-            return _snap_graphics_position(value, self.grid_spacing)
+        if (change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
+                and self._dragging and self.snap_enabled):
+            return _snap_graphics_position(value, True, self.grid_spacing)
         if (
             change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged
             and not getattr(self, "_initializing", True)
@@ -291,23 +467,18 @@ class SourceSymbol(QGraphicsObject):
     move_committed = Signal(str, float, float, float, float)
 
     def __init__(
-        self,
-        identifier: UUID,
-        name: str,
-        subtype: str,
-        *,
-        snap_enabled: bool = False,
-        grid_spacing: float = 20.0,
+        self, identifier: UUID, name: str, subtype: str, *,
+        snap_enabled: bool = True, grid_spacing: float = 20.0,
     ) -> None:
         super().__init__()
         self._initializing = True
         self.identifier = identifier
         self.name = name
         self.subtype = subtype
-        self._drag_start = QPointF()
-        self._dragging = False
         self.snap_enabled = bool(snap_enabled)
         self.grid_spacing = float(grid_spacing)
+        self._drag_start = QPointF()
+        self._dragging = False
         self.setData(ROLE_ELEMENT, ("generator", str(identifier)))
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsMovable
@@ -327,13 +498,17 @@ class SourceSymbol(QGraphicsObject):
         selected = self.isSelected()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         ink = QColor("#D97706" if selected else "#172033")
-        painter.setPen(QPen(ink, 2.0))
+        scene_scale = LABEL_SCENE_UNITS_PER_PT
+        radius = 44.0 * 0.44
+        painter.setPen(QPen(ink, 0.7 * scene_scale))
         painter.setBrush(QBrush(QColor("#FFFFFF")))
-        painter.drawEllipse(QRectF(-22.0, -22.0, 44.0, 44.0))
-        painter.setPen(QPen(ink, 1.4))
-        painter.setFont(QFont("Segoe UI", 14, QFont.Weight.DemiBold))
+        painter.drawEllipse(QPointF(0.0, 0.0), radius, radius)
+        painter.setPen(QPen(ink, 0.7 * scene_scale))
+        font = _scene_font("STIX Two Text", 11.0, QFont.Weight.DemiBold)
+        painter.setFont(font)
         glyph = "G" if self.subtype == "synchronous_generator" else "~"
-        painter.drawText(QRectF(-17.0, -16.0, 34.0, 32.0), Qt.AlignmentFlag.AlignCenter, glyph)
+        metrics = QFontMetricsF(font)
+        painter.drawText(QPointF(-metrics.horizontalAdvance(glyph) / 2.0, 0.28 * radius), glyph)
 
     def mousePressEvent(self, event) -> None:
         self._drag_start = self.pos()
@@ -341,25 +516,24 @@ class SourceSymbol(QGraphicsObject):
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        super().mouseReleaseEvent(event)
-        self._dragging = False
-        current = self.pos()
-        if (current - self._drag_start).manhattanLength() > 0.1:
-            self.move_committed.emit(
-                str(self.identifier),
-                self._drag_start.x(),
-                self._drag_start.y(),
-                current.x(),
-                current.y(),
-            )
+        try:
+            super().mouseReleaseEvent(event)
+            current = self.pos()
+            if (current - self._drag_start).manhattanLength() > 0.1:
+                self.move_committed.emit(
+                    str(self.identifier),
+                    self._drag_start.x(),
+                    self._drag_start.y(),
+                    current.x(),
+                    current.y(),
+                )
+        finally:
+            self._dragging = False
 
     def itemChange(self, change, value):
-        if (
-            change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
-            and self.snap_enabled
-            and self._dragging
-        ):
-            return _snap_graphics_position(value, self.grid_spacing)
+        if (change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
+                and self._dragging and self.snap_enabled):
+            return _snap_graphics_position(value, True, self.grid_spacing)
         if (
             change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged
             and not getattr(self, "_initializing", True)
@@ -381,7 +555,7 @@ class DiagramLabelItem(QGraphicsTextItem):
         self.label_id = label.label_id
         self.owner_id = label.owner_id
         self.anchor = label.anchor
-        self.font_family = label.font_family
+        self.font_family = _resolve_scene_font_family(label.font_family)
         self.size_pt = label.size_pt
         self.weight = label.weight
         self.color = label.color
@@ -396,6 +570,7 @@ class DiagramLabelItem(QGraphicsTextItem):
         self._drag_start = QPointF()
         self.setData(ROLE_ELEMENT, ("label", str(label.label_id)))
         self.setDefaultTextColor(QColor(self.color))
+        self.document().setDocumentMargin(0.0)
         self._apply_font()
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
@@ -431,15 +606,16 @@ class DiagramLabelItem(QGraphicsTextItem):
         return x, self.pos().y() + metrics.ascent()
 
     def _apply_font(self) -> None:
-        font = QFont(self.font_family)
-        font.setPointSizeF(self.size_pt)
-        font.setWeight({
-            "normal": QFont.Weight.Normal,
-            "medium": QFont.Weight.Medium,
-            "semibold": QFont.Weight.DemiBold,
-            "bold": QFont.Weight.Bold,
-        }[self.weight])
-        self.setFont(font)
+        self.setFont(_scene_font(
+            self.font_family,
+            self.size_pt,
+            {
+                "normal": QFont.Weight.Normal,
+                "medium": QFont.Weight.Medium,
+                "semibold": QFont.Weight.DemiBold,
+                "bold": QFont.Weight.Bold,
+            }[self.weight],
+        ))
 
     def _on_text_changed(self) -> None:
         self._sync_scene_position()
@@ -492,7 +668,7 @@ class DiagramLabelItem(QGraphicsTextItem):
         fonts = menu.addMenu("Font family")
         font_actions = [
             (fonts.addAction(name), name)
-            for name in ("STIX Two Text", "Cambria", "Arial", "Times New Roman")
+            for name in _available_label_font_families()
         ]
         colors = menu.addMenu("Text color")
         color_actions = [
@@ -554,25 +730,18 @@ class BranchSymbol(QGraphicsPathItem):
     """
 
     def __init__(
-        self,
-        identifier: UUID,
-        name: str,
-        from_point: QPointF,
-        to_point: QPointF,
-        label: str,
-        *,
-        snap_enabled: bool = False,
-        grid_spacing: float = 20.0,
+        self, identifier: UUID, name: str, from_point: QPointF, to_point: QPointF, label: str,
+        *, snap_enabled: bool = True, grid_spacing: float = 20.0,
     ) -> None:
         super().__init__()
         self._branch_signals = _BranchSymbolSignals()
         self._initializing = True
         self.identifier = identifier
         self.name = name
-        self._drag_start = QPointF()
-        self._dragging = False
         self.snap_enabled = bool(snap_enabled)
         self.grid_spacing = float(grid_spacing)
+        self._drag_start = QPointF()
+        self._dragging = False
         self.setData(ROLE_ELEMENT, ("line", str(identifier)))
         self.setZValue(2)
         self.setFlags(
@@ -580,12 +749,13 @@ class BranchSymbol(QGraphicsPathItem):
             | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
             | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
         )
-        self.setPen(QPen(QColor("#172033"), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.SquareCap))
+        self.setPen(QPen(QColor("#172033"), 0.72 * LABEL_SCENE_UNITS_PER_PT,
+                         Qt.PenStyle.SolidLine, Qt.PenCapStyle.SquareCap))
         self.setBrush(Qt.BrushStyle.NoBrush)
         self.set_endpoints(from_point, to_point)
         self.label_item = QGraphicsSimpleTextItem(label)
         self.label_item.setBrush(QBrush(QColor("#0F172A")))
-        self.label_item.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
+        self.label_item.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
         self.label_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
         self.label_item.setZValue(5)
         self._initializing = False
@@ -617,22 +787,21 @@ class BranchSymbol(QGraphicsPathItem):
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        super().mouseReleaseEvent(event)
-        self._dragging = False
-        current = self.pos()
-        if (current - self._drag_start).manhattanLength() > 0.1:
-            self.move_committed.emit(
-                str(self.identifier), self._drag_start.x(), self._drag_start.y(),
-                current.x(), current.y(),
-            )
+        try:
+            super().mouseReleaseEvent(event)
+            current = self.pos()
+            if (current - self._drag_start).manhattanLength() > 0.1:
+                self.move_committed.emit(
+                    str(self.identifier), self._drag_start.x(), self._drag_start.y(),
+                    current.x(), current.y(),
+                )
+        finally:
+            self._dragging = False
 
     def itemChange(self, change, value):
-        if (
-            change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
-            and self.snap_enabled
-            and self._dragging
-        ):
-            return _snap_graphics_position(value, self.grid_spacing)
+        if (change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
+                and self._dragging and self.snap_enabled):
+            return _snap_graphics_position(value, True, self.grid_spacing)
         if (
             change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged
             and not getattr(self, "_initializing", True)
@@ -664,6 +833,8 @@ class NetworkCanvasView(QGraphicsView):
         self._selection_callback_connected = True
         self._workspace: NetworkWorkspace | None = None
         self._command_service = None
+        self._operating_topology = None
+        self._operating_projection_error: str | None = None
         self._bus_items: dict[str, BusSymbol] = {}
         self._source_items: dict[str, SourceSymbol] = {}
         self._equipment_items: dict[str, CanonicalEquipmentSymbol] = {}
@@ -683,6 +854,7 @@ class NetworkCanvasView(QGraphicsView):
         self._source_candidate_selection_when_hidden: set[str] = set()
         self._grid_visible = True
         self._snap_enabled = True
+        self._grid_spacing = 20.0
         self._middle_pan = False
         self._pan_last = None
         self._applying_position = False
@@ -698,8 +870,7 @@ class NetworkCanvasView(QGraphicsView):
         self.setRubberBandSelectionMode(Qt.ItemSelectionMode.IntersectsItemShape)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
-        self._theme_palette = palette_for_theme("dark")
-        self.setBackgroundBrush(QColor(self._theme_palette.canvas))
+        self.setBackgroundBrush(QColor("#FFFFFF"))
         self._scene.selectionChanged.connect(self._emit_selection)
         self._build_empty_state()
 
@@ -785,6 +956,7 @@ class NetworkCanvasView(QGraphicsView):
     def set_workspace(self, workspace: NetworkWorkspace) -> None:
         self._workspace = workspace
         self._snap_enabled = workspace.snap_enabled
+        self._grid_spacing = float(workspace.grid_spacing)
         self.render_network()
 
     def render_network(self) -> None:
@@ -803,9 +975,18 @@ class NetworkCanvasView(QGraphicsView):
         self._draft_symbol_items.clear()
         self._symbol_links.clear()
         if self._workspace is None:
+            self._operating_topology = None
+            self._operating_projection_error = None
             self._scene.setSceneRect(QRectF(-1200.0, -900.0, 2400.0, 1800.0))
             self._update_empty_state()
             return
+        self._operating_topology = None
+        self._operating_projection_error = None
+        if self._workspace.active_operating_scenario is not None:
+            try:
+                self._operating_topology = analyze_workspace(self._workspace)
+            except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+                self._operating_projection_error = str(exc)
         try:
             document = project_network_to_diagram(self._workspace)
         except DiagramProjectionError as exc:
@@ -819,6 +1000,15 @@ class NetworkCanvasView(QGraphicsView):
             return
         self._projection_error = None
         network = self._workspace.network
+        operating_buses = (
+            {item.bus_id: item for item in self._operating_topology.buses}
+            if self._operating_topology is not None else {}
+        )
+        operating_equipment = (
+            {item.equipment_id: item for item in self._operating_topology.equipment}
+            if self._operating_topology is not None else {}
+        )
+        active_scenario = self._workspace.active_operating_scenario
         bus_positions = {str(item.bus_id): QPointF(item.center.x, item.center.y)
                          for item in document.buses}
         projected_bus_by_id = {str(item.bus_id): item for item in document.buses}
@@ -862,7 +1052,16 @@ class NetworkCanvasView(QGraphicsView):
             for point in conductor.points[1:]:
                 path.lineTo(QPointF(point.x, point.y))
             link = QGraphicsPathItem(path)
-            link.setPen(QPen(QColor("#334155"), 1.6, Qt.PenStyle.SolidLine))
+            operational_record = operating_equipment.get(equipment.id)
+            conductor_color = (
+                QColor("#15803D")
+                if operational_record is not None and operational_record.contributes_to_connectivity
+                else QColor("#94A3B8")
+                if operational_record is not None
+                else QColor("#334155")
+            )
+            link.setPen(QPen(conductor_color, 0.72 * LABEL_SCENE_UNITS_PER_PT,
+                             Qt.PenStyle.SolidLine))
             link.setZValue(3)
             self._scene.addItem(link)
             self._conductor_items[str(conductor.terminal_id)] = link
@@ -870,14 +1069,13 @@ class NetworkCanvasView(QGraphicsView):
         for bus in network.buses:
             projected = next(item for item in document.buses if item.bus_id == bus.id)
             bar_length = max(projected.bounds.width, projected.bounds.height)
+            bus_operational = operating_buses.get(bus.id)
             item = BusSymbol(
-                bus.id,
-                bus.name,
-                bus.nominal_voltage.value_kv,
-                self._snap_enabled,
-                bus.kind,
-                bar_length,
-                self._workspace.grid_spacing,
+                bus.id, bus.name, bus.nominal_voltage.value_kv,
+                self._snap_enabled, bus.kind, bar_length,
+                bus_operational.state if bus_operational is not None else None,
+                bus_operational.grounded if bus_operational is not None else False,
+                grid_spacing=self._grid_spacing,
             )
             item.setPos(bus_positions[str(bus.id)])
             self._last_layout_positions[str(bus.id)] = (item.pos().x(), item.pos().y())
@@ -895,7 +1093,10 @@ class NetworkCanvasView(QGraphicsView):
         for conductor in document.conductors:
             if not conductor.points:
                 continue
-            marker = QGraphicsEllipseItem(-2.8, -2.8, 5.6, 5.6)
+            tap_radius = 1.7 * LABEL_SCENE_UNITS_PER_PT
+            marker = QGraphicsEllipseItem(
+                -tap_radius, -tap_radius, 2.0 * tap_radius, 2.0 * tap_radius
+            )
             marker.setPen(QPen(Qt.PenStyle.NoPen))
             marker.setBrush(QBrush(QColor("#172033")))
             marker.setZValue(24)
@@ -912,13 +1113,8 @@ class NetworkCanvasView(QGraphicsView):
                 p1 = QPointF(projected.terminal_points[0].x, projected.terminal_points[0].y)
                 p2 = QPointF(projected.terminal_points[1].x, projected.terminal_points[1].y)
                 line = BranchSymbol(
-                    equipment.id,
-                    equipment.name,
-                    p1,
-                    p2,
-                    "",
-                    snap_enabled=self._snap_enabled,
-                    grid_spacing=self._workspace.grid_spacing,
+                    equipment.id, equipment.name, p1, p2, "",
+                    snap_enabled=self._snap_enabled, grid_spacing=self._grid_spacing,
                 )
                 self._scene.addItem(line)
                 self._branch_items[str(equipment.id)] = line
@@ -927,13 +1123,10 @@ class NetworkCanvasView(QGraphicsView):
                 line.move_committed.connect(self.position_committed.emit)
             elif projected.family == "source" and isinstance(equipment, (EquivalentSource, SynchronousGenerator)):
                 symbol = SourceSymbol(
-                    equipment.id,
-                    equipment.name,
-                    "equivalent_source"
-                    if isinstance(equipment, EquivalentSource)
+                    equipment.id, equipment.name,
+                    "equivalent_source" if isinstance(equipment, EquivalentSource)
                     else "synchronous_generator",
-                    snap_enabled=self._snap_enabled,
-                    grid_spacing=self._workspace.grid_spacing,
+                    snap_enabled=self._snap_enabled, grid_spacing=self._grid_spacing,
                 )
                 symbol.setPos(QPointF(projected.center.x, projected.center.y))
                 self._last_layout_positions[str(equipment.id)] = (symbol.pos().x(), symbol.pos().y())
@@ -946,14 +1139,22 @@ class NetworkCanvasView(QGraphicsView):
                     (item.text for item in document.labels if item.owner_id == equipment.id),
                     equipment.name,
                 )
+                operational_record = operating_equipment.get(equipment.id)
+                simulated_position = (
+                    operational_record.switch_position.value
+                    if operational_record is not None and operational_record.switch_position is not None
+                    else projected.state
+                )
                 symbol = CanonicalEquipmentSymbol(
-                    equipment.id, equipment.name, projected.family, projected.state,
-                    projected.width,
-                    projected.height,
-                    projected.orientation_deg,
+                    equipment.id, equipment.name, projected.family, simulated_position,
+                    projected.width, projected.height, projected.orientation_deg,
                     projected_label,
+                    operating_override=(
+                        active_scenario is not None
+                        and equipment.id in active_scenario.switch_positions
+                    ),
                     snap_enabled=self._snap_enabled,
-                    grid_spacing=self._workspace.grid_spacing,
+                    grid_spacing=self._grid_spacing,
                 )
                 symbol.setPos(QPointF(projected.center.x, projected.center.y))
                 self._last_layout_positions[str(equipment.id)] = (symbol.pos().x(), symbol.pos().y())
@@ -976,11 +1177,38 @@ class NetworkCanvasView(QGraphicsView):
                 continue
             self._add_draft_symbol_item(placement, definition)
         self._render_mapped_symbol_connections()
+        if self._snap_enabled:
+            # Normalize only existing manual overrides; auto-layout coordinates remain derived.
+            for collection in (self._bus_items, self._source_items, self._equipment_items, self._branch_items):
+                for identifier, graphics_item in collection.items():
+                    key = UUID(identifier)
+                    if key in self._workspace.diagram_positions:
+                        point = graphics_item.pos()
+                        self._workspace.diagram_positions[key] = (float(point.x()), float(point.y()))
+            for identifier, graphics_item in self._draft_symbol_items.items():
+                placement = self._workspace.diagram_symbols.get(UUID(identifier))
+                if placement is not None:
+                    point = graphics_item.pos()
+                    self._workspace.update_diagram_symbol(
+                        placement.instance_id, x=float(point.x()), y=float(point.y())
+                    )
         self._update_branch_geometry()
         items_rect = self._scene.itemsBoundingRect()
         self._scene.setSceneRect(items_rect.adjusted(-120, -100, 180, 120)
                                  if not items_rect.isEmpty()
                                  else QRectF(-1200.0, -900.0, 2400.0, 1800.0))
+        if active_scenario is not None:
+            banner_text = (
+                f"OPERATING SCENARIO: {active_scenario.name}  |  SIMULATION ONLY"
+                if self._operating_projection_error is None
+                else f"OPERATING SCENARIO ERROR: {self._operating_projection_error}"
+            )
+            banner = QGraphicsSimpleTextItem(banner_text)
+            banner.setBrush(QBrush(QColor("#1D4ED8" if self._operating_projection_error is None else "#B91C1C")))
+            banner.setFont(_scene_font("Segoe UI", 8.0, QFont.Weight.DemiBold))
+            banner.setPos(self._scene.sceneRect().left() + 20.0, self._scene.sceneRect().top() + 12.0)
+            banner.setZValue(100)
+            self._scene.addItem(banner)
         self._update_empty_state()
         self.viewport().update()
 
@@ -1050,13 +1278,12 @@ class NetworkCanvasView(QGraphicsView):
             instance_id=placement.instance_id,
             require_connectable=bool(placement.terminal_mappings),
             rotation_deg=placement.rotation_deg,
-            snap_enabled=False,
-            grid_spacing=self._workspace.grid_spacing if self._workspace is not None else 20.0,
+            snap_enabled=self._snap_enabled,
+            grid_spacing=self._grid_spacing,
         )
         item.setPos(QPointF(placement.x, placement.y))
         if placement.equipment_id is not None:
             item.setData(ROLE_ELEMENT, ("equipment", str(placement.equipment_id)))
-        item.snap_enabled = self._snap_enabled
         item.position_committed.connect(self.position_committed.emit)
         item.setZValue(30)
         item.setVisible(self._source_candidates_visible)
@@ -1224,13 +1451,18 @@ class NetworkCanvasView(QGraphicsView):
         self.viewport().update()
 
     def _update_branch_geometry(self) -> None:
-        """Route each terminal wire from its current bus tap to its equipment pin."""
+        """Route terminal wires, preferring independent straight bus drops."""
         if self._workspace is None:
             return
-        for terminal_id, (bus_id, equipment_id, local_x, local_y, angle_deg, tap_axis_offset) in self._terminal_route_specs.items():
-            bus_item = self._bus_items.get(str(bus_id))
-            link = self._conductor_items.get(terminal_id)
-            if bus_item is None or link is None:
+
+        resolved: list[tuple[str, BusSymbol, QPointF, float]] = []
+        desired_offsets_by_bus: dict[str, list[tuple[str, float]]] = {}
+        for terminal_id, (
+            bus_id, equipment_id, local_x, local_y, angle_deg, reserved_tap_offset
+        ) in self._terminal_route_specs.items():
+            bus_key = str(bus_id)
+            bus_item = self._bus_items.get(bus_key)
+            if bus_item is None or terminal_id not in self._conductor_items:
                 continue
             equipment_item = (
                 self._source_items.get(str(equipment_id))
@@ -1238,27 +1470,52 @@ class NetworkCanvasView(QGraphicsView):
                 or self._branch_items.get(str(equipment_id))
             )
             if equipment_item is not None:
-                item_angle = (0.0 if isinstance(equipment_item, BranchSymbol)
-                              else float(getattr(equipment_item, "orientation_deg", angle_deg)))
+                item_angle = (
+                    0.0 if isinstance(equipment_item, BranchSymbol)
+                    else float(getattr(equipment_item, "orientation_deg", angle_deg))
+                )
                 angle = math.radians(item_angle)
                 terminal_point = equipment_item.pos() + QPointF(
                     local_x * math.cos(angle) - local_y * math.sin(angle),
                     local_x * math.sin(angle) + local_y * math.cos(angle),
                 )
             else:
-                # Line branches are immutable two-terminal spans in the current
-                # Workbench interaction model; their pin coordinates stay fixed.
+                # Branches without a movable graphics item retain their projected pin.
                 terminal_point = self._terminal_projected_points.get(terminal_id)
                 if terminal_point is None:
                     continue
-            bus_point = bus_item.connection_point(terminal_point, tap_axis_offset)
+
+            bus_angle = math.radians(bus_item.rotation())
+            axis_x, axis_y = math.cos(bus_angle), math.sin(bus_angle)
+            dx = terminal_point.x() - bus_item.pos().x()
+            dy = terminal_point.y() - bus_item.pos().y()
+            desired_offset = dx * axis_x + dy * axis_y
+            if bus_item.kind is BusKind.BUSBAR:
+                desired_offset = max(
+                    -bus_item.width / 2.0,
+                    min(bus_item.width / 2.0, desired_offset),
+                )
+            desired_offsets_by_bus.setdefault(bus_key, []).append(
+                (terminal_id, desired_offset)
+            )
+            resolved.append((terminal_id, bus_item, terminal_point, reserved_tap_offset))
+
+        # A wire can be a single perpendicular segment when its projected tap
+        # does not collide with another terminal on the same bus. If two
+        # terminals compete for nearly the same tap, retain their reserved bays.
+        straight_terminal_ids: set[str] = set()
+        for entries in desired_offsets_by_bus.values():
+            straight_terminal_ids.update(
+                select_straight_bus_taps(entries, minimum_separation=18.0)
+            )
+
+        for terminal_id, bus_item, terminal_point, reserved_tap_offset in resolved:
+            tap_offset = None if terminal_id in straight_terminal_ids else reserved_tap_offset
+            bus_point = bus_item.connection_point(terminal_point, tap_offset)
             junction = self._junction_items.get(terminal_id)
             if junction is not None:
                 junction.setPos(bus_point)
-            # Use the exact same pure geometry routine as SVG/PDF projection.
-            # It collapses a collinear bay into one segment instead of retaining
-            # redundant intermediate QPainterPath elements, and uses one
-            # Manhattan-minimal orthogonal jog only when a bar is moved off-lane.
+
             route = perpendicular_bay_route(
                 Point(bus_point.x(), bus_point.y()),
                 Point(terminal_point.x(), terminal_point.y()),
@@ -1270,7 +1527,7 @@ class NetworkCanvasView(QGraphicsView):
                 path = QPainterPath(QPointF(route[0].x, route[0].y))
                 for point in route[1:]:
                     path.lineTo(QPointF(point.x, point.y))
-                link.setPath(path)
+                self._conductor_items[terminal_id].setPath(path)
         self._update_symbol_connection_geometry()
 
     def _on_layout_changed(self, identifier: str, x: float, y: float) -> None:
@@ -1413,21 +1670,20 @@ class NetworkCanvasView(QGraphicsView):
 
     def set_snap_enabled(self, enabled: bool) -> None:
         self._snap_enabled = bool(enabled)
-        spacing = self._workspace.grid_spacing if self._workspace is not None else 20.0
+        if self._workspace is not None:
+            self._grid_spacing = float(self._workspace.grid_spacing)
+            self._workspace.snap_enabled = self._snap_enabled
         for item in self._bus_items.values():
             item.snap = self._snap_enabled
-            item.grid_spacing = spacing
-        for collection in (
-            self._source_items,
-            self._equipment_items,
-            self._branch_items,
-            self._draft_symbol_items,
-        ):
+            item.grid_spacing = self._grid_spacing
+        for collection in (self._source_items, self._equipment_items, self._branch_items):
             for item in collection.values():
                 item.snap_enabled = self._snap_enabled
-                item.grid_spacing = spacing
-        if self._workspace is not None:
-            self._workspace.snap_enabled = self._snap_enabled
+                item.grid_spacing = self._grid_spacing
+        for item in self._draft_symbol_items.values():
+            item.snap_enabled = self._snap_enabled
+            item.grid_spacing = self._grid_spacing
+        self.viewport().update()
 
     def apply_position(self, identifier: str, x: float, y: float) -> None:
         item = (
@@ -1442,7 +1698,9 @@ class NetworkCanvasView(QGraphicsView):
         self._applying_position = True
         try:
             item.setPos(QPointF(x, y))
-            actual_x, actual_y = item.pos().x(), item.pos().y()
+            actual = item.pos()
+            actual_x, actual_y = float(actual.x()), float(actual.y())
+            self._last_layout_positions[identifier] = (actual_x, actual_y)
             if self._workspace is not None:
                 key = UUID(identifier)
                 if key in self._workspace.diagram_symbols:
@@ -1453,17 +1711,11 @@ class NetworkCanvasView(QGraphicsView):
         finally:
             self._applying_position = False
 
-    def set_visual_theme(self, theme: str) -> None:
-        """Apply canvas-specific colors without altering electrical geometry."""
-        self._theme_palette = palette_for_theme(theme)
-        self.setBackgroundBrush(QColor(self._theme_palette.canvas))
-        self.viewport().update()
-
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
         super().drawBackground(painter, rect)
         if not self._grid_visible:
             return
-        fine_grid = self._workspace.grid_spacing if self._workspace is not None else 20.0
+        fine_grid = self._grid_spacing
         major_grid = fine_grid * 5.0
         left = math.floor(rect.left() / fine_grid) * fine_grid
         top = math.floor(rect.top() / fine_grid) * fine_grid
@@ -1479,10 +1731,10 @@ class NetworkCanvasView(QGraphicsView):
             target = major_lines if math.isclose(y % major_grid, 0.0, abs_tol=1e-7) else fine_lines
             target.append((QPointF(rect.left(), y), QPointF(rect.right(), y)))
             y += fine_grid
-        painter.setPen(QPen(QColor(self._theme_palette.canvas_grid_minor), 0.0))
+        painter.setPen(QPen(QColor("#F2F4F7"), 0.0))
         for start, end in fine_lines:
             painter.drawLine(start, end)
-        painter.setPen(QPen(QColor(self._theme_palette.canvas_grid_major), 0.0))
+        painter.setPen(QPen(QColor("#E7EBF0"), 0.0))
         for start, end in major_lines:
             painter.drawLine(start, end)
 

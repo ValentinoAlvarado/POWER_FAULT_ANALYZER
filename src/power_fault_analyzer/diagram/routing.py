@@ -6,9 +6,10 @@ connectivity; callers provide explicit terminal points and obstacle envelopes.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass
+from itertools import pairwise
 from math import hypot
-from typing import Iterable
 
 from .layout import Point, Rect, snap_point
 
@@ -101,5 +102,8 @@ def route_orthogonal_avoiding(
     keys.reverse()
     raw = [Point(x * grid, y * grid) for x, y in keys]
     points = _compress(raw)
-    length = sum(hypot(b.x - a.x, b.y - a.y) for a, b in zip(points, points[1:]))
+    length = sum(
+        hypot(b.x - a.x, b.y - a.y)
+        for a, b in pairwise(points)
+    )
     return RouteResult(points, max(0, len(points) - 2), length)

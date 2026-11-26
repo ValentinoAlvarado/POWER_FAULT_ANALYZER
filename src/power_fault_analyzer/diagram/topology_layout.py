@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from .layout import Point, Rect
 
@@ -32,7 +32,7 @@ class TopologyLayout:
 
 def layout_topology(
     nodes: Iterable[LayoutNode], edges: Iterable[LayoutEdge], *,
-    origin: Point = Point(80.0, 80.0), grid: float = 20.0,
+    origin: Point | None = None, grid: float = 20.0,
     horizontal_gap: float = 120.0, vertical_gap: float = 100.0,
 ) -> TopologyLayout:
     """Layer a directed drawing graph; cycles are handled deterministically.
@@ -40,6 +40,8 @@ def layout_topology(
     Edges describe visual/logical relationships supplied by the caller. They are
     not electrical connections unless built from the canonical network model.
     """
+    if origin is None:
+        origin = Point(80.0, 80.0)
     node_list = tuple(nodes)
     ids = [node.identifier for node in node_list]
     if len(ids) != len(set(ids)):

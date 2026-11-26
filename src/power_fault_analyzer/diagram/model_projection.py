@@ -9,25 +9,34 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from math import atan2, cos, degrees, hypot, radians, sin
-from uuid import UUID, NAMESPACE_URL, uuid5
+from itertools import pairwise
+from math import ceil, cos, hypot, radians, sin
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from power_fault_analyzer.application.use_cases.network_workspace import (
     DiagramLabelPlacement,
     NetworkWorkspace,
 )
 from power_fault_analyzer.domain.aggregates.network import Network
-from power_fault_analyzer.equipment.interfaces.unresolved_branch import UnresolvedTwoTerminalEquipment
-from power_fault_analyzer.equipment.interfaces.unresolved_equipment import UnresolvedEquipmentInterface
-from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import UnresolvedSingleTerminalEquipment
+from power_fault_analyzer.equipment.interfaces.unresolved_branch import (
+    UnresolvedTwoTerminalEquipment,
+)
+from power_fault_analyzer.equipment.interfaces.unresolved_equipment import (
+    UnresolvedEquipmentInterface,
+)
+from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import (
+    UnresolvedSingleTerminalEquipment,
+)
 from power_fault_analyzer.equipment.sources.equivalent_source import EquivalentSource
 from power_fault_analyzer.equipment.sources.synchronous_generator import SynchronousGenerator
 from power_fault_analyzer.equipment.switching.switching_device import SwitchingDevice
+from power_fault_analyzer.equipment.transformers.two_winding_transformer import (
+    TwoWindingTransformer,
+)
 from power_fault_analyzer.equipment.transmission.line import Line
-from power_fault_analyzer.equipment.transformers.two_winding_transformer import TwoWindingTransformer
 
 from .layout import Point, Rect, perpendicular_bay_route, snap_point
-from .symbol_catalog import SYMBOL_CATALOG, get_symbol_definition
+from .symbol_catalog import get_symbol_definition
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +91,7 @@ class EngineeringLabel:
     anchor: str = "middle"
     label_id: UUID | None = None
     font_family: str = "Segoe UI"
-    size_pt: float = 9.0
+    size_pt: float = 7.5
     weight: str = "normal"
     color: str = "#172033"
     rotation_deg: float = 0.0
@@ -126,7 +135,12 @@ _BUS_MAX_LENGTH = 280.0
 _BUS_THICKNESS = 6.0
 _PATH_BUS_SPACING = 280.0
 _PATH_CENTER_Y = 420.0
-_LABEL_SCENE_UNITS_PER_PT = 2.8
+LABEL_SCENE_UNITS_PER_PT = 2.8
+_EQUIPMENT_LABEL_OWNER_RADIUS = 74.0
+_EQUIPMENT_LABEL_SEARCH_STEP = 2.0
+_EQUIPMENT_LABEL_MAX_TANGENT_SHIFT = 48.0
+_EQUIPMENT_LABEL_MIN_NORMAL_ADJUSTMENT = -16.0
+_EQUIPMENT_LABEL_MAX_NORMAL_ADJUSTMENT = 24.0
 
 
 def _equipment_family(equipment) -> tuple[str, str | None]:
@@ -146,7 +160,9 @@ def _equipment_family(equipment) -> tuple[str, str | None]:
         return "line", None
     if isinstance(equipment, UnresolvedSingleTerminalEquipment):
         if equipment.equipment_kind == "source":
-            from power_fault_analyzer.domain.enums.equipment_interface import ParameterEvidenceStatus
+            from power_fault_analyzer.domain.enums.equipment_interface import (
+                ParameterEvidenceStatus,
+            )
             confirmed = any(
                 item.status is ParameterEvidenceStatus.USER_CONFIRMED
                 for item in equipment.parameters
@@ -291,7 +307,13 @@ def _automatic_bus_layout(network: Network, grid: float):
     # bay corridor.  This is what permits terminal taps on connected bars to
     # align on one vertical lane instead of forcing long lateral dog-legs.
     x_left, x_right = 360.0, 420.0
-    y_top, row_spacing = 220.0, 180.0
+    # Compact composition: keep the row pitch aligned to the workspace grid.
+    # Bus centers are snapped independently below; a 144-unit pitch on the
+    # default 20-unit grid produced alternating 140/160-unit gaps. 140 is the
+    # nearest compact grid pitch that preserves 36 units of lead on each side
+    # of the largest 68-unit two-terminal symbol. Coarser grids round upward.
+    y_top = 220.0
+    row_spacing = max(140.0, ceil(140.0 / grid) * grid)
 
     if ordered_path is not None:
         for index, bus_id in enumerate(ordered_path):
@@ -374,7 +396,7 @@ def _transform_local(center: Point, local: tuple[float, float], angle_deg: float
 
 def _label(
     owner_id: UUID | None, text: str, position: Point, *, anchor: str = "middle",
-    size_pt: float = 9.0, weight: str = "normal", color: str = "#172033",
+    size_pt: float = 7.5, weight: str = "normal", color: str = "#172033",
     priority: int = 50, role: str = "annotations", label_key: str = "label",
 ) -> EngineeringLabel:
     label_id = uuid5(NAMESPACE_URL, f"urn:pfa:diagram-label:{owner_id}:{label_key}")
@@ -395,33 +417,47 @@ def _layout_equipment_label(
     equipment_id: UUID, name: str, state: str | None, center: Point,
     width: float, height: float, orientation_deg: float, *, side: str = "above",
 ) -> tuple[EngineeringLabel, ...]:
-    extent = max(width, height) / 2.0
+    """Place equipment text close to its *rotated* symbol envelope.
+
+    Using max(width, height) for every orientation left unnecessary gaps beside
+    vertical bay equipment. The rotated half-extents keep labels close without
+    placing them over the actual glyph.
+    """
+    angle = radians(orientation_deg)
+    half_width = (abs(cos(angle)) * width + abs(sin(angle)) * height) / 2.0
+    half_height = (abs(sin(angle)) * width + abs(cos(angle)) * height) / 2.0
+    label_clearance = 10.0
+    label_size_pt = 9.0
+    label_height = _label_scene_height(label_size_pt)
+
     if side == "below":
-        label_anchor = Point(center.x, center.y + extent + 18.0)
+        # EngineeringLabel.position is the text baseline, and its scene bounds
+        # extend upward from that baseline. Add the full text height here so a
+        # below-symbol label starts beyond the glyph envelope instead of
+        # overlapping the symbol and being pushed sideways by the collision pass.
+        label_anchor = Point(
+            center.x,
+            center.y + half_height + label_clearance + label_height,
+        )
         anchor = "middle"
-        warning_anchor = Point(center.x, label_anchor.y + 15.0)
     elif side == "right":
-        label_anchor = Point(center.x + extent + 18.0, center.y + 3.0)
+        label_anchor = Point(center.x + half_width + label_clearance, center.y + 4.0)
         anchor = "start"
-        warning_anchor = Point(label_anchor.x, label_anchor.y + 15.0)
     elif side == "left":
-        label_anchor = Point(center.x - extent - 18.0, center.y + 3.0)
+        label_anchor = Point(center.x - half_width - label_clearance, center.y + 4.0)
         anchor = "end"
-        warning_anchor = Point(label_anchor.x, label_anchor.y + 15.0)
     elif abs(orientation_deg % 180.0) > 1e-6:
-        label_anchor = Point(center.x + extent + 18.0, center.y + 3.0)
+        label_anchor = Point(center.x + half_width + label_clearance, center.y + 4.0)
         anchor = "start"
-        warning_anchor = Point(label_anchor.x, label_anchor.y + 15.0)
     else:
-        label_anchor = Point(center.x, center.y - extent - 15.0)
+        label_anchor = Point(center.x, center.y - half_height - label_clearance)
         anchor = "middle"
-        warning_anchor = Point(center.x, label_anchor.y + 15.0)
     if state == "unresolved":
         name = f"{name}†"
     elif state == "partial-data":
         name = f"{name}‡"
     return (_label(equipment_id, name, label_anchor, anchor=anchor,
-                   size_pt=9.0, weight="semibold", priority=20,
+                   size_pt=label_size_pt, weight="semibold", priority=20,
                    label_key="equipment-name"),)
 
 
@@ -434,8 +470,12 @@ def _equipment_center_for_single_terminal(
         # beyond half the busbar length: doing so can overlap the next bus row.
         y = bus.center.y - 72.0 if family == "source" else bus.center.y + 72.0
         return Point(tap.x, y)
-    x = (bus.center.x - length / 2.0 - 70.0 if family == "source"
-         else bus.center.x + length / 2.0 + 70.0)
+    half_bus_extent_x = bus.bounds.width / 2.0
+    x = (
+        bus.center.x - half_bus_extent_x - 70.0
+        if family == "source"
+        else bus.center.x + half_bus_extent_x + 70.0
+    )
     return Point(x, tap.y)
 
 
@@ -606,12 +646,17 @@ def _terminal_bus_taps(
     return result
 
 
+def _label_scene_height(size_pt: float) -> float:
+    """Return the annotation's vertical envelope in canonical scene units."""
+    return max(12.0, size_pt * 1.25 * LABEL_SCENE_UNITS_PER_PT)
+
+
 def _label_bounds(label: EngineeringLabel) -> Rect:
     # size_pt is a physical typographic size. Convert it to drawing-space
     # clearance using the default publication scale; the SVG renderer then
     # maps the exact point size to the chosen page dimensions.
-    width = max(24.0, len(label.text) * label.size_pt * 0.54 * _LABEL_SCENE_UNITS_PER_PT)
-    height = max(12.0, label.size_pt * 1.25 * _LABEL_SCENE_UNITS_PER_PT)
+    width = max(24.0, len(label.text) * label.size_pt * 0.54 * LABEL_SCENE_UNITS_PER_PT)
+    height = _label_scene_height(label.size_pt)
     if label.anchor == "middle":
         left = label.position.x - width / 2.0
     elif label.anchor == "end":
@@ -619,6 +664,122 @@ def _label_bounds(label: EngineeringLabel) -> Rect:
     else:
         left = label.position.x
     return Rect(left, label.position.y - height, width, height)
+
+
+def _label_bounds_at(
+    label: EngineeringLabel, position: Point, anchor: str,
+) -> Rect:
+    """Return the physical text envelope at a candidate baseline and anchor."""
+    width = max(24.0, len(label.text) * label.size_pt * 0.54 * LABEL_SCENE_UNITS_PER_PT)
+    height = _label_scene_height(label.size_pt)
+    if anchor == "middle":
+        left = position.x - width / 2.0
+    elif anchor == "end":
+        left = position.x - width
+    else:
+        left = position.x
+    return Rect(left, position.y - height, width, height)
+
+
+def _local_equipment_label_candidates(
+    label: EngineeringLabel, symbol: EngineeringSymbol,
+) -> tuple[tuple[Point, str], ...]:
+    """Generate local label placements on all four sides of the owning symbol.
+
+    The earlier search translated one fixed anchor. That cannot solve a label
+    which is trapped between its own symbol and a vertical conductor: sliding
+    left makes it hit the symbol, while sliding right keeps it on the conductor.
+    Changing from a start/middle anchor to an end/middle anchor lets the label
+    occupy the clear side of the same symbol without changing its text size.
+    Candidate baselines remain inside the strict owner radius and are ordered by
+    minimum displacement from the symbol center, then by movement from the
+    initially projected location for deterministic, stable layouts.
+    """
+    symbol_bounds = _rotated_bounds(
+        symbol.center, symbol.width, symbol.height, symbol.orientation_deg,
+    )
+    label_height = _label_scene_height(label.size_pt)
+    clearance = 10.0
+    step = _EQUIPMENT_LABEL_SEARCH_STEP
+
+    # Each base placement puts the text envelope just outside the symbol.
+    # The normal adjustment allows a candidate to move slightly inward or
+    # outward when another object (for example, a neighboring bus) blocks the
+    # exact edge-aligned position. Collision checks still protect the symbol.
+    side_bases = (
+        ("top", Point(symbol.center.x, symbol_bounds.y - clearance), "middle",
+         (1.0, 0.0), (0.0, -1.0)),
+        ("bottom", Point(
+            symbol.center.x,
+            symbol_bounds.bottom + clearance + label_height,
+        ), "middle", (1.0, 0.0), (0.0, 1.0)),
+        ("left", Point(
+            symbol_bounds.x - clearance,
+            symbol.center.y + label_height / 2.0,
+        ), "end", (0.0, 1.0), (-1.0, 0.0)),
+        ("right", Point(
+            symbol_bounds.right + clearance,
+            symbol.center.y + label_height / 2.0,
+        ), "start", (0.0, 1.0), (1.0, 0.0)),
+    )
+    if label.anchor == "start":
+        preferred_side = "right"
+    elif label.anchor == "end":
+        preferred_side = "left"
+    else:
+        preferred_side = "bottom" if label.position.y >= symbol.center.y else "top"
+
+    candidates: list[tuple[Point, str, str, int]] = [
+        (label.position, label.anchor, preferred_side, -1),
+    ]
+    tangent_steps = int(_EQUIPMENT_LABEL_MAX_TANGENT_SHIFT // step)
+    normal_values = range(
+        int(_EQUIPMENT_LABEL_MIN_NORMAL_ADJUSTMENT // step),
+        int(_EQUIPMENT_LABEL_MAX_NORMAL_ADJUSTMENT // step) + 1,
+    )
+    for side_index, (side, base, anchor, tangent_axis, normal_axis) in enumerate(side_bases):
+        for tangent_index in range(-tangent_steps, tangent_steps + 1):
+            tangent = tangent_index * step
+            for normal_index in normal_values:
+                normal = normal_index * step
+                position = Point(
+                    base.x + tangent_axis[0] * tangent + normal_axis[0] * normal,
+                    base.y + tangent_axis[1] * tangent + normal_axis[1] * normal,
+                )
+                distance = hypot(
+                    position.x - symbol.center.x,
+                    position.y - symbol.center.y,
+                )
+                if distance < _EQUIPMENT_LABEL_OWNER_RADIUS:
+                    candidates.append((position, anchor, side, side_index))
+
+    # Deduplicate identical baseline/anchor combinations before sorting.
+    unique: dict[tuple[float, float, str], tuple[Point, str, str, int]] = {}
+    for position, anchor, side, side_index in candidates:
+        key = (round(position.x, 6), round(position.y, 6), anchor)
+        current = unique.get(key)
+        if current is None or side_index < current[3]:
+            unique[key] = (position, anchor, side, side_index)
+
+    ordered = sorted(
+        unique.values(),
+        key=lambda candidate: (
+            0 if candidate[2] == preferred_side else 1,
+            hypot(
+                candidate[0].x - symbol.center.x,
+                candidate[0].y - symbol.center.y,
+            ),
+            hypot(
+                candidate[0].x - label.position.x,
+                candidate[0].y - label.position.y,
+            ),
+            candidate[3],
+            candidate[1],
+            candidate[0].x,
+            candidate[0].y,
+        ),
+    )
+    return tuple((position, anchor) for position, anchor, _side, _side_index in ordered)
 
 
 def _wire_bounds(first: Point, second: Point, clearance: float = 6.0) -> Rect:
@@ -643,7 +804,6 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
         if identifier in bus_by_id:
             positions[identifier] = Point(float(pair[0]), float(pair[1]))
 
-    adjacency, equipment_by_pair, shunts = _topology(network)
     buses: list[EngineeringBus] = []
     bus_by_identifier: dict[UUID, EngineeringBus] = {}
     for bus in network.buses:
@@ -688,16 +848,16 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
             # Put both identifiers beyond the physical right end of the bar.
             # This keeps bay drops and junctions clear of bus names/voltages.
             label_x = bus.bounds.right + 12.0
-            name_position = Point(label_x, bus.center.y - 9.0)
-            voltage_position = Point(label_x, bus.center.y + 18.0)
+            name_position = Point(label_x, bus.center.y - 11.0)
+            voltage_position = Point(label_x, bus.center.y + 23.0)
             name_anchor = voltage_anchor = "start"
         else:
             label_x = bus.center.x - 16.0
-            name_position = Point(label_x, bus.center.y - bus.bounds.height / 2.0 - 18.0)
-            voltage_position = Point(label_x, bus.center.y + bus.bounds.height / 2.0 + 19.0)
+            name_position = Point(label_x, bus.center.y - bus.bounds.height / 2.0 - 13.0)
+            voltage_position = Point(label_x, bus.center.y + bus.bounds.height / 2.0 + 27.0)
             name_anchor = voltage_anchor = "end"
         labels.append(_label(bus.bus_id, bus.name, name_position, anchor=name_anchor,
-                             size_pt=9.0, weight="semibold", priority=10,
+                             size_pt=9.2, weight="semibold", priority=10,
                              label_key="bus-name"))
         labels.append(_label(bus.bus_id, f"{bus.nominal_voltage_kv:g} kV", voltage_position,
                              anchor=voltage_anchor, size_pt=8.2, color="#526273", priority=40,
@@ -808,18 +968,18 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
             + [label.position.y for label in labels]
         )
         left_x = min(bus.bounds.x for bus in buses)
-        legend_y = lowest_y + 74.0
+        legend_y = lowest_y + 42.0
         if unresolved_count:
             labels.append(_label(
                 None, "† Equipment parameters unresolved", Point(left_x, legend_y),
-                anchor="start", size_pt=8.0, color="#8A5A12", priority=90,
+                anchor="start", size_pt=7.2, color="#8A5A12", priority=90,
                 label_key=f"document-note:{network.id}:unresolved",
             ))
-            legend_y += 17.0
+            legend_y += 20.0
         if partial_count:
             labels.append(_label(
                 None, "‡ Sequence-network data incomplete", Point(left_x, legend_y),
-                anchor="start", size_pt=8.0, color="#8A5A12", priority=91,
+                anchor="start", size_pt=7.2, color="#8A5A12", priority=91,
                 label_key=f"document-note:{network.id}:sequence",
             ))
 
@@ -845,7 +1005,7 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
     wire_obstacles = [
         _wire_bounds(first, second)
         for conductor in conductors
-        for first, second in zip(conductor.points, conductor.points[1:])
+        for first, second in pairwise(conductor.points)
     ]
     wire_obstacles.extend(
         _wire_bounds(symbol.terminal_points[0], symbol.terminal_points[1])
@@ -876,33 +1036,44 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
             obstacles.extend(_rotated_bounds(other.center, other.width, other.height,
                                              other.orientation_deg) for other in symbols)
         # Generated layouts already assign distinct lanes. Shift only colliding
-        # annotations; do not mutate their owner or model data.
-        step_x = max(10.0, min(24.0, rect.width * 0.22))
-        step_y = max(12.0, rect.height * 1.20)
-        candidate_offsets: list[tuple[float, float]] = [(0.0, 0.0)]
-        # Prefer a short horizontal adjustment before moving text away from its
-        # equipment. Expand the search radially only when the local halo is busy.
-        for level in range(1, 9):
-            dx, dy = step_x * level, step_y * level
-            candidate_offsets.extend((
-                (-dx, 0.0), (dx, 0.0),
-                (0.0, -dy), (0.0, dy),
-                (-dx, -dy), (dx, -dy), (-dx, dy), (dx, dy),
-            ))
+        # annotations; do not mutate their owner or model data. Equipment names
+        # use a fine local search so collision resolution cannot send them far
+        # away from the symbol merely because a coarse vertical candidate passed
+        # before a smaller horizontal/diagonal correction was examined.
+        owner_symbol = equipment_symbol_by_id.get(item.owner_id)
+        if owner_symbol is not None and item.priority == 20:
+            candidate_placements = _local_equipment_label_candidates(item, owner_symbol)
+        else:
+            step_x = max(10.0, min(24.0, rect.width * 0.22))
+            step_y = max(12.0, rect.height * 1.20)
+            offsets = [(0.0, 0.0)]
+            for level in range(1, 9):
+                dx, dy = step_x * level, step_y * level
+                offsets.extend((
+                    (-dx, 0.0), (dx, 0.0),
+                    (0.0, -dy), (0.0, dy),
+                    (-dx, -dy), (dx, -dy), (-dx, dy), (dx, dy),
+                ))
+            candidate_placements = tuple(
+                (Point(item.position.x + dx, item.position.y + dy), item.anchor)
+                for dx, dy in offsets
+            )
         chosen = None
-        for offset_x, offset_y in candidate_offsets:
-            candidate = Point(item.position.x + offset_x, item.position.y + offset_y)
-            candidate_rect = Rect(rect.x + offset_x, rect.y + offset_y, rect.width, rect.height)
+        chosen_anchor = item.anchor
+        for candidate, candidate_anchor in candidate_placements:
+            candidate_rect = _label_bounds_at(item, candidate, candidate_anchor)
             if not any(candidate_rect.intersects(block, clearance=3.0) for block in obstacles):
                 chosen = candidate
+                chosen_anchor = candidate_anchor
                 rect = candidate_rect
                 break
         if chosen is None:
             chosen = item.position
+            chosen_anchor = item.anchor
             diagnostics.append(f"LABEL_COLLISION:{item.owner_id}:{item.text}")
         placed.append(rect)
         normalized_labels.append(EngineeringLabel(
-            item.owner_id, item.text, chosen, item.anchor, item.label_id,
+            item.owner_id, item.text, chosen, chosen_anchor, item.label_id,
             item.font_family, item.size_pt, item.weight, item.color,
             item.rotation_deg, item.visible, item.layer, item.priority,
             item.unit, item.number_format,
@@ -931,26 +1102,65 @@ def _rotated_bounds(center: Point, width: float, height: float, angle_deg: float
                 max(rotated_width, 0.1), max(rotated_height, 0.1))
 
 
-def validate_diagram_document(workspace: NetworkWorkspace, document: DiagramDocument) -> tuple[str, ...]:
-    """Check canonical identity, terminal correspondence and presentation geometry."""
+def validate_diagram_document(
+    workspace: NetworkWorkspace, document: DiagramDocument
+) -> tuple[str, ...]:
+    """Validate that a diagram is a lossless projection of its canonical network.
+
+    Identity/cardinality checks deliberately use ordered records and counters, not
+    only frozensets: sets conceal duplicate symbols, terminals and conductors.
+    The drawing remains presentation-only; this validator never infers an
+    electrical junction from a graphical crossing.
+    """
     errors: list[str] = []
+    tolerance = 1e-6
     network = workspace.network
+
     if document.network_id != network.id:
         errors.append("network identity mismatch")
-    if document.equipment_ids != frozenset(item.id for item in network.equipment):
+
+    expected_bus_ids = {item.id for item in network.buses}
+    projected_bus_ids = [item.bus_id for item in document.buses]
+    projected_bus_id_set = set(projected_bus_ids)
+    if len(projected_bus_ids) != len(projected_bus_id_set):
+        errors.append("duplicate bus projection identity")
+    if projected_bus_id_set != expected_bus_ids or len(projected_bus_ids) != len(expected_bus_ids):
+        errors.append("bus projection mismatch")
+    bus_by_id = {item.bus_id: item for item in document.buses}
+
+    equipment_by_id = {item.id: item for item in network.equipment}
+    expected_equipment_ids = set(equipment_by_id)
+    projected_equipment_ids = [item.equipment_id for item in document.symbols]
+    projected_equipment_id_set = set(projected_equipment_ids)
+    if len(projected_equipment_ids) != len(projected_equipment_id_set):
+        errors.append("duplicate equipment symbol projection")
+    if (
+        projected_equipment_id_set != expected_equipment_ids
+        or len(projected_equipment_ids) != len(expected_equipment_ids)
+    ):
         errors.append("equipment/symbol mismatch")
-    if document.terminal_ids != frozenset(
-        terminal.id for equipment in network.equipment for terminal in equipment.terminals
+    symbol_by_id = {item.equipment_id: item for item in document.symbols}
+
+    terminal_owner: dict[UUID, UUID] = {}
+    expected_terminal_ids: set[UUID] = set()
+    for equipment in network.equipment:
+        for terminal in equipment.terminals:
+            expected_terminal_ids.add(terminal.id)
+            terminal_owner[terminal.id] = equipment.id
+
+    projected_terminal_ids = [
+        terminal_id for symbol in document.symbols for terminal_id in symbol.terminal_ids
+    ]
+    projected_terminal_id_set = set(projected_terminal_ids)
+    if len(projected_terminal_ids) != len(projected_terminal_id_set):
+        errors.append("duplicate terminal in symbol projection")
+    if (
+        projected_terminal_id_set != expected_terminal_ids
+        or len(projected_terminal_ids) != len(expected_terminal_ids)
     ):
         errors.append("terminal/symbol mismatch")
-    expected = frozenset((item.terminal_id, item.bus_id) for item in network.connections)
-    if document.connection_pairs != expected:
-        errors.append("terminal/connection mismatch")
-    symbol_by_id = {item.equipment_id: item for item in document.symbols}
-    terminal_owner = {
-        terminal.id: equipment.id
-        for equipment in network.equipment for terminal in equipment.terminals
-    }
+
+    symbol_terminal_points: dict[UUID, Point] = {}
     for symbol in document.symbols:
         if symbol.width <= 0 or symbol.height <= 0:
             errors.append(f"invalid symbol dimensions: {symbol.name}")
@@ -958,38 +1168,114 @@ def validate_diagram_document(workspace: NetworkWorkspace, document: DiagramDocu
             errors.append(f"symbol terminal cardinality mismatch: {symbol.name}")
         if not symbol.symbol_id:
             errors.append(f"symbol definition missing: {symbol.name}")
+        equipment = equipment_by_id.get(symbol.equipment_id)
+        if equipment is None:
+            errors.append(f"symbol references unknown equipment: {symbol.equipment_id}")
+            continue
+        expected_for_equipment = tuple(item.id for item in equipment.terminals)
+        if symbol.terminal_ids != expected_for_equipment:
+            errors.append(f"symbol terminal ownership mismatch: {symbol.name}")
+        for terminal_id, terminal_point in zip(symbol.terminal_ids, symbol.terminal_points):
+            if terminal_owner.get(terminal_id) != symbol.equipment_id:
+                errors.append(f"symbol terminal ownership mismatch: {symbol.name}")
+            if terminal_id in symbol_terminal_points:
+                errors.append(f"terminal has multiple symbol pins: {terminal_id}")
+            else:
+                symbol_terminal_points[terminal_id] = terminal_point
+
     for bus in document.buses:
         if bus.bounds.width <= 0 or bus.bounds.height <= 0:
             errors.append(f"invalid busbar dimensions: {bus.name}")
-    bus_by_id = {item.bus_id: item for item in document.buses}
+
+    expected_connection_by_terminal = {
+        item.terminal_id: item.bus_id for item in network.connections
+    }
+    expected_connection_pairs = set(expected_connection_by_terminal.items())
+    if len(expected_connection_by_terminal) != len(network.connections):
+        errors.append("canonical network contains duplicate terminal connections")
+    if set(expected_connection_by_terminal) != expected_terminal_ids:
+        errors.append("canonical network has missing or unknown terminal connections")
+
+    conductor_terminal_ids = [item.terminal_id for item in document.conductors]
+    conductor_terminal_id_set = set(conductor_terminal_ids)
+    if len(conductor_terminal_ids) != len(conductor_terminal_id_set):
+        errors.append("duplicate conductor terminal projection")
+    if (
+        conductor_terminal_id_set != set(expected_connection_by_terminal)
+        or len(conductor_terminal_ids) != len(expected_connection_by_terminal)
+    ):
+        errors.append("conductor/connection cardinality mismatch")
+    actual_connection_pairs = {(item.terminal_id, item.bus_id) for item in document.conductors}
+    if (
+        actual_connection_pairs != expected_connection_pairs
+        or len(document.conductors) != len(expected_connection_pairs)
+    ):
+        errors.append("terminal/connection mismatch")
+
     for conductor in document.conductors:
-        if not conductor.points:
-            errors.append(f"empty conductor for terminal {conductor.terminal_id}")
+        if conductor.terminal_id not in expected_connection_by_terminal:
+            errors.append(f"conductor references unknown terminal: {conductor.terminal_id}")
+        elif expected_connection_by_terminal[conductor.terminal_id] != conductor.bus_id:
+            errors.append(f"conductor connected to wrong bus: {conductor.terminal_id}")
+
+        if len(conductor.points) < 2:
+            errors.append(f"conductor has fewer than two points: {conductor.terminal_id}")
             continue
-        for first, second in zip(conductor.points, conductor.points[1:]):
-            if first.x != second.x and first.y != second.y:
-                errors.append(f"non-orthogonal conductor segment at terminal {conductor.terminal_id}")
-        direct_manhattan = (abs(conductor.points[-1].x - conductor.points[0].x)
-                            + abs(conductor.points[-1].y - conductor.points[0].y))
+        if any(first == second for first, second in pairwise(conductor.points)):
+            errors.append(f"conductor contains zero-length segment: {conductor.terminal_id}")
+        for first, second in pairwise(conductor.points):
+            if abs(first.x - second.x) > tolerance and abs(first.y - second.y) > tolerance:
+                errors.append(
+                    f"non-orthogonal conductor segment at terminal {conductor.terminal_id}"
+                )
+        direct_manhattan = (
+            abs(conductor.points[-1].x - conductor.points[0].x)
+            + abs(conductor.points[-1].y - conductor.points[0].y)
+        )
         actual_manhattan = sum(
             abs(second.x - first.x) + abs(second.y - first.y)
-            for first, second in zip(conductor.points, conductor.points[1:])
+            for first, second in pairwise(conductor.points)
         )
-        if actual_manhattan > direct_manhattan + 1e-6:
+        if actual_manhattan > direct_manhattan + tolerance:
             errors.append(f"non-minimal orthogonal route at terminal {conductor.terminal_id}")
+
         bus = bus_by_id.get(conductor.bus_id)
-        if bus is not None and abs(bus.orientation_deg % 180.0) < 1e-6 and len(conductor.points) > 1:
-            first_segment = conductor.points[1]
-            if abs(first_segment.x - conductor.points[0].x) > 1e-6:
-                errors.append(f"bus departure is not perpendicular at terminal {conductor.terminal_id}")
-        owner = terminal_owner.get(conductor.terminal_id)
-        if owner in symbol_by_id and conductor.points[-1] not in symbol_by_id[owner].terminal_points:
-            errors.append(f"conductor terminal mismatch for equipment {symbol_by_id[owner].name}")
+        if bus is None:
+            errors.append(f"conductor references unknown bus: {conductor.bus_id}")
+        else:
+            start_point = conductor.points[0]
+            horizontal = abs(bus.orientation_deg % 180.0) < tolerance
+            if horizontal:
+                on_bus_axis = abs(start_point.y - bus.center.y) <= tolerance
+                within_extent = (
+                    bus.bounds.x - tolerance <= start_point.x <= bus.bounds.right + tolerance
+                )
+                perpendicular = abs(conductor.points[1].x - start_point.x) <= tolerance
+            else:
+                on_bus_axis = abs(start_point.x - bus.center.x) <= tolerance
+                within_extent = (
+                    bus.bounds.y - tolerance <= start_point.y <= bus.bounds.bottom + tolerance
+                )
+                perpendicular = abs(conductor.points[1].y - start_point.y) <= tolerance
+            if not on_bus_axis or not within_extent:
+                errors.append(f"conductor tap is outside its busbar: {conductor.terminal_id}")
+            if not perpendicular:
+                errors.append(
+                    f"bus departure is not perpendicular at terminal {conductor.terminal_id}"
+                )
+
+        expected_terminal_point = symbol_terminal_points.get(conductor.terminal_id)
+        if expected_terminal_point is not None and conductor.points[-1] != expected_terminal_point:
+            owner_id = terminal_owner.get(conductor.terminal_id)
+            owner_symbol = symbol_by_id.get(owner_id)
+            owner_name = owner_symbol.name if owner_symbol is not None else str(owner_id)
+            errors.append(f"conductor terminal mismatch for equipment {owner_name}")
+
     visible_labels = [item for item in document.labels if item.visible]
     wire_bounds = [
         _wire_bounds(first, second)
         for conductor in document.conductors
-        for first, second in zip(conductor.points, conductor.points[1:])
+        for first, second in pairwise(conductor.points)
     ]
     wire_bounds.extend(
         _wire_bounds(symbol.terminal_points[0], symbol.terminal_points[1])
@@ -1002,11 +1288,13 @@ def validate_diagram_document(workspace: NetworkWorkspace, document: DiagramDocu
             if bounds.intersects(wire):
                 errors.append(f"label overlaps conductor: {label.text!r}")
         for symbol in document.symbols:
-            symbol_bounds = _rotated_bounds(symbol.center, symbol.width, symbol.height,
-                                            symbol.orientation_deg)
+            symbol_bounds = _rotated_bounds(
+                symbol.center, symbol.width, symbol.height, symbol.orientation_deg
+            )
             if symbol.equipment_id != label.owner_id and bounds.intersects(symbol_bounds):
                 errors.append(f"label overlaps equipment symbol {symbol.name}")
         for other in visible_labels[index + 1:]:
             if bounds.intersects(_label_bounds(other), clearance=2.0):
                 errors.append(f"label collision: {label.text!r} / {other.text!r}")
     return tuple(dict.fromkeys(errors))
+

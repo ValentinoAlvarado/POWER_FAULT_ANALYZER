@@ -1,3 +1,4 @@
+
 name: Windows desktop release
 
 on:
@@ -13,23 +14,63 @@ jobs:
   build-windows-x64:
     runs-on: windows-latest
     timeout-minutes: 90
+
     env:
       PFA_RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # ---------------------------------------------------------
+      # 1. Source and Python environment
+      # ---------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13 x64
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           architecture: x64
           cache: pip
+
+      # ---------------------------------------------------------
+      # 2. Native Windows installer compiler
+      # ---------------------------------------------------------
       - name: Install NSIS compiler
         shell: pwsh
         run: |
           choco install nsis --yes --no-progress
-          if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { throw "NSIS compiler was not installed." }
+
+          $nsisPath = "C:\Program Files (x86)\NSIS\makensis.exe"
+
+          if (-not (Test-Path -LiteralPath $nsisPath)) {
+              throw "NSIS compiler was not installed: $nsisPath"
+          }
+
+          Write-Host "NSIS compiler available: $nsisPath"
+
+      # ---------------------------------------------------------
+      # 3. QElectroTech symbol assets
+      # ---------------------------------------------------------
       - name: Acquire pinned QElectroTech symbol assets
         shell: pwsh
-        run: ./scripts/Acquire-QElectroTechSymbolSeed.ps1
+        run: |
+          ./scripts/Acquire-QElectroTechSymbolSeed.ps1
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "QElectroTech symbol acquisition failed."
+          }
+
+          $licenseFile = "assets/third_party/qelectrotech-elements/ELEMENTS.LICENSE"
+
+          if (-not (Test-Path -LiteralPath $licenseFile)) {
+              throw "QElectroTech license manifest is missing."
+          }
+
+          Write-Host "QElectroTech assets acquired and license manifest verified."
+
+      # ---------------------------------------------------------
+      # 4. Cairo native runtime
+      # ---------------------------------------------------------
       - name: Install Cairo native runtime
         uses: msys2/setup-msys2@v2
         id: cairo
@@ -43,27 +84,153 @@ jobs:
         env:
           MSYS2_LOCATION: ${{ steps.cairo.outputs.msys2-location }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:MSYS2_LOCATION)) {
+              throw "MSYS2 installation location was not provided."
+          }
+
           $cairoBin = Join-Path $env:MSYS2_LOCATION "ucrt64\bin"
           $cairoDll = Join-Path $cairoBin "libcairo-2.dll"
 
           if (-not (Test-Path -LiteralPath $cairoDll)) {
-              throw "Cairo runtime not found: $cairoDll"
+              throw "Cairo native library was not found: $cairoDll"
           }
 
+          # Make Cairo discoverable by cairocffi.
           "CAIROCFFI_DLL_DIRECTORIES=$cairoBin" |
               Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+          # Make Cairo and its native dependencies discoverable.
           $cairoBin |
               Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
           Write-Host "Cairo runtime configured: $cairoBin"
+          Write-Host "Cairo DLL verified: $cairoDll"
+
+      - name: Verify Cairo native runtime
+        shell: pwsh
+        env:
+          MSYS2_LOCATION: ${{ steps.cairo.outputs.msys2-location }}
+        run: |
+          $cairoBin = Join-Path $env:MSYS2_LOCATION "ucrt64\bin"
+          $cairoDll = Join-Path $cairoBin "libcairo-2.dll"
+
+          if (-not (Test-Path -LiteralPath $cairoDll)) {
+              throw "Cairo DLL is unavailable."
+          }
+
+          $env:CAIROCFFI_DLL_DIRECTORIES = $cairoBin
+          $env:PATH = "$cairoBin;$env:PATH"
+
+          python -c "import cairocffi; print('PASS: cairocffi loaded')"
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Cairo native runtime import failed."
+          }
+
+          python -c "import cairosvg; print('PASS: CairoSVG loaded')"
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "CairoSVG import failed."
+          }
+
+      # ---------------------------------------------------------
+      # 5. Consolidated tests and Windows application packaging
+      # ---------------------------------------------------------
       - name: Build, test and package Windows application
         shell: pwsh
-        run: ./scripts/build_windows_release.ps1
-      - uses: actions/upload-artifact@v4
+        run: |
+          ./scripts/build_windows_release.ps1
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Windows application build failed."
+          }
+
+      # ---------------------------------------------------------
+      # 6. Verify expected release artifacts
+      # ---------------------------------------------------------
+      - name: Verify release artifacts
+        shell: pwsh
+        run: |
+          $requiredFiles = @(
+              "dist/release/PFA-Setup-x64.exe",
+              "dist/release/PFA-Windows-x64.zip",
+              "dist/release/SHA256SUMS.txt",
+              "dist/release/SBOM.cdx.json",
+              "dist/release/PYTHON-DEPENDENCY-LICENSES.md",
+              "dist/release/THIRD_PARTY_NOTICES.md",
+              "dist/release/BUILD-INFO.json"
+          )
+
+          foreach ($file in $requiredFiles) {
+              if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+                  throw "Required release artifact is missing: $file"
+              }
+
+              $item = Get-Item -LiteralPath $file
+
+              if ($item.Length -le 0) {
+                  throw "Release artifact is empty: $file"
+              }
+
+              Write-Host "PASS $file ($($item.Length) bytes)"
+          }
+
+      # ---------------------------------------------------------
+      # 7. Verify SHA-256 checksums
+      # ---------------------------------------------------------
+      - name: Verify SHA256 checksums
+        shell: pwsh
+        run: |
+          $checksumFile = "dist/release/SHA256SUMS.txt"
+
+          foreach ($line in Get-Content $checksumFile) {
+              if ($line -notmatch '^([a-fA-F0-9]{64})\s+(.+)$') {
+                  throw "Invalid checksum line: $line"
+              }
+
+              $expectedHash = $Matches[1].ToLowerInvariant()
+              $fileName = $Matches[2].Trim()
+              $filePath = Join-Path "dist/release" $fileName
+
+              if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
+                  throw "Checksum target does not exist: $filePath"
+              }
+
+              $actualHash = (
+                  Get-FileHash -LiteralPath $filePath -Algorithm SHA256
+              ).Hash.ToLowerInvariant()
+
+              if ($actualHash -ne $expectedHash) {
+                  throw "SHA256 mismatch: $fileName"
+              }
+
+              Write-Host "PASS SHA256 $fileName"
+          }
+
+      # ---------------------------------------------------------
+      # 8. Dependency license review
+      # ---------------------------------------------------------
+      - name: Require reviewed licenses for packages without metadata
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          python scripts/verify_release_license_review.py `
+              --inventory dist/release/PYTHON-DEPENDENCY-LICENSES.md `
+              --review RELEASE_LICENSE_REVIEW.csv
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Third-party license review failed. Release blocked."
+          }
+
+      # ---------------------------------------------------------
+      # 9. Upload CI artifacts
+      # ---------------------------------------------------------
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
         with:
           name: POWER-FAULT-ANALYZER-Windows-${{ github.ref_name }}
           if-no-files-found: error
+          retention-days: 30
           path: |
             dist/release/PFA-Setup-x64.exe
             dist/release/PFA-Windows-x64.zip
@@ -72,11 +239,10 @@ jobs:
             dist/release/PYTHON-DEPENDENCY-LICENSES.md
             dist/release/THIRD_PARTY_NOTICES.md
             dist/release/BUILD-INFO.json
-      - name: Require reviewed licenses for packages without metadata
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        run: |
-          python scripts/verify_release_license_review.py --inventory dist/release/PYTHON-DEPENDENCY-LICENSES.md --review RELEASE_LICENSE_REVIEW.csv
+
+      # ---------------------------------------------------------
+      # 10. Publish GitHub Release only when triggered by a tag
+      # ---------------------------------------------------------
       - name: Publish GitHub Release assets
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -84,6 +250,7 @@ jobs:
           name: POWER_FAULT_ANALYZER ${{ github.ref_name }}
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
           files: |
             dist/release/PFA-Setup-x64.exe
             dist/release/PFA-Windows-x64.zip

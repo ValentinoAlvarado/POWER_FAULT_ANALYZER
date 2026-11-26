@@ -1,11 +1,4 @@
-# Third-party attribution and license register
-
-## Project license
-
-- **PFA original code:** GNU GPL-3.0-or-later. See root `LICENSE` and `NOTICE.md`.
-- **Copyright notice:** Valentino Alvarado and contributors; individual files retain any pre-existing notices.
-- Third-party software and asset licenses remain independent; this file is not a blanket relicensing notice.
-
+# Third-party attribution and license register — initial seed
 
 ## QElectroTech Elements collection
 
@@ -44,18 +37,3 @@ Maintain a generated SBOM and the licenses/notices for the exact pinned versions
 
 See `docs/engineering/OPEN_SOURCE_UI_AND_ENGINEERING_LIBRARIES.md` for install profiles, scope boundaries and distribution requirements. Release builds must generate a version-specific SBOM and include exact dependency notices.
 - **Font Awesome Free icon assets (via QtAwesome)** — the QtAwesome Python wrapper is MIT; Font Awesome Free icons are CC BY 4.0 and its font files are SIL OFL 1.1. Preserve upstream attribution and font notices in binary distributions. Do not assume the wrapper's MIT license changes the icon/font licenses.
-
-## NSIS Windows installer compiler
-
-- **Tool:** Nullsoft Scriptable Install System (NSIS).
-- **Use:** compiles the PFA setup `.exe`; the release script selects the zlib compressor.
-- **License:** zlib/libpng license for the NSIS core and zlib compression module.
-- **Notice:** `LICENSES/NSIS-zlib-libpng.txt`.
-- **Source:** https://nsis.sourceforge.io/License
-
-## Build-time Python dependency inventory
-
-Every release workflow emits `PYTHON-DEPENDENCY-LICENSES.md` and a CycloneDX 1.6
-`SBOM.cdx.json` from the actual Python 3.13 build environment. This captures the
-resolved package versions and license metadata for that build; it is not a substitute
-for reviewing any package whose license metadata is missing or ambiguous.

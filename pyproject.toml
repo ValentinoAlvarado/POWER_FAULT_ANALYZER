@@ -1,25 +1,11 @@
 [build-system]
-requires = ["setuptools>=77", "wheel"]
+requires = ["setuptools>=75", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "power-fault-analyzer"
-version = "0.1.0b1"
-description = "Open-source power-system engineering workbench and short-circuit analysis platform"
-readme = "README.md"
-license = "GPL-3.0-or-later"
-license-files = ["LICENSE", "LICENSES/*"]
-authors = [{ name = "Valentino Alvarado" }]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Environment :: Win32 (MS Windows)",
-    "Framework :: PySide",
-    "Intended Audience :: Science/Research",
-    "Intended Audience :: Education",
-    "Operating System :: Microsoft :: Windows",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Scientific/Engineering",
-]
+version = "0.1.0"
+description = "Extensible power-system short-circuit analysis platform"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "numpy>=2.2,<3",
@@ -54,6 +40,7 @@ api = [
 
 [project.scripts]
 pfa-validate = "power_fault_analyzer.validation.cli:main"
+pfa = "power_fault_analyzer.interfaces.cli.main:main"
 pfa-desktop = "power_fault_analyzer.interfaces.desktop.app:main"
 
 [tool.setuptools.packages.find]
@@ -61,7 +48,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 
 [tool.ruff]
 line-length = 100
@@ -70,9 +57,3 @@ extend-exclude = ["POWER_FAULT_ANALYZER.ipynb"]
 
 [tool.setuptools.package-data]
 power_fault_analyzer = ["py.typed", "validation/data/*.json"]
-
-[project.urls]
-Homepage = "https://valentinoalvarado.github.io/POWER_FAULT_ANALYZER/"
-Repository = "https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER"
-Issues = "https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/issues"
-Releases = "https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/releases"

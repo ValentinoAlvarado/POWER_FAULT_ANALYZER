@@ -3,9 +3,16 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSplitter,
-    QTextBrowser, QVBoxLayout, QWidget,
+    QHBoxLayout,
+    QLabel,
+    QPlainTextEdit,
+    QPushButton,
+    QSplitter,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
 )
+
 from power_fault_analyzer.scripting.qt_worker import ScriptWorkerController
 
 STARTER_SCRIPT = '''project = ScriptProject("Untitled electrical project")
@@ -81,7 +88,7 @@ class CodeAutomationStudio(QWidget):
         try:
             self.output.setPlainText("Starting isolated worker process…")
             self.worker.start(self.editor.toPlainText())
-        except Exception as exc:
+        except (RuntimeError, ValueError) as exc:
             self.output.setPlainText(f"WORKER START ERROR\n{type(exc).__name__}: {exc}")
 
     def validate_script(self) -> None:

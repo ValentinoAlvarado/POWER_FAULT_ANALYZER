@@ -109,7 +109,14 @@ def test_interactive_qet_item_is_movable_and_rotatable_around_source_hotspot() -
     assert item.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsMovable
     assert item.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
     item.setPos(QPointF(13.0, 11.0))
+    # Programmatic positioning is exact; grid snapping belongs to pointer drag.
+    assert item.pos().x() == pytest.approx(13.0)
+    assert item.pos().y() == pytest.approx(11.0)
+
     # Snap the declared hotspot (not an arbitrary top-left bounding-box corner).
+    item._dragging = True  # mousePressEvent enables this during interactive movement
+    item.setPos(QPointF(14.0, 13.0))
+    item._dragging = False
     assert item.pos().x() == pytest.approx(10.0)
     assert item.pos().y() == pytest.approx(10.0)
     anchor = item.mapToScene(item.transformOriginPoint())

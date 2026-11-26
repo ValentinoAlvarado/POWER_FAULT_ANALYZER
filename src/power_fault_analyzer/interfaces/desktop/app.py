@@ -7,7 +7,7 @@ import sys
 
 def main() -> int:
     try:
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QStyleFactory
     except ImportError as exc:
         raise SystemExit(
             "PySide6 is required. Install the desktop dependencies with "
@@ -18,6 +18,10 @@ def main() -> int:
     from power_fault_analyzer.interfaces.desktop.workbench.workbench_window import WorkbenchWindow
 
     application = QApplication(sys.argv)
+    # Fusion provides deterministic widget rendering across Windows themes.
+    fusion_style = QStyleFactory.create("Fusion")
+    if fusion_style is not None:
+        application.setStyle(fusion_style)
     application.setApplicationName("POWER_FAULT_ANALYZER")
     application.setOrganizationName("POWER_FAULT_ANALYZER")
     application.setApplicationDisplayName("POWER_FAULT_ANALYZER — Engineering Workbench")

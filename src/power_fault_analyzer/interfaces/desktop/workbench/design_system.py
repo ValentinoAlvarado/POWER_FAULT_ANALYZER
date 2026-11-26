@@ -385,6 +385,12 @@ QLabel#DiagramEyebrow, QLabel#SectionEyebrow, QLabel#WorkbenchPanelHeading {
     font-size: 9pt;
     font-weight: 700;
 }
+QLabel#CommandSectionLabel {
+    color: @text_muted@;
+    font-size: 8pt;
+    font-weight: 700;
+    padding: 0 4px 0 2px;
+}
 QLabel#DiagramTitle {
     color: @text@;
     font-size: 11pt;

@@ -36,6 +36,7 @@ def test_stylesheet_resolves_every_semantic_token(theme: str) -> None:
 
     assert "QDockWidget::title" in stylesheet
     assert "QToolBar#EngineeringCommandBar" in stylesheet
+    assert "QLabel#CommandSectionLabel" in stylesheet
     assert "QTreeWidget::item:selected" in stylesheet
     assert "QLineEdit:focus" in stylesheet
     assert "QSplitter::handle:hover" in stylesheet

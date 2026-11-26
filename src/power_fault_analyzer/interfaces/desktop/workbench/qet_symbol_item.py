@@ -228,7 +228,7 @@ class QETSymbolItem(QGraphicsObject):
         font_string = primitive.get("font", "") or ""
         font = QFont()
         if not font_string or not font.fromString(font_string):
-            font = QFont("Segoe UI", 9)
+            font = QFont("Segoe UI", 10)
         painter.setFont(font)
         color = QColor(primitive.get("color", "black") or "black")
         painter.setPen(QPen(color if color.isValid() else QColor("black")))

@@ -81,8 +81,8 @@ class EngineeringLabel:
     position: Point
     anchor: str = "middle"
     label_id: UUID | None = None
-    font_family: str = "STIX Two Text"
-    size_pt: float = 7.5
+    font_family: str = "Segoe UI"
+    size_pt: float = 9.0
     weight: str = "normal"
     color: str = "#172033"
     rotation_deg: float = 0.0
@@ -374,11 +374,11 @@ def _transform_local(center: Point, local: tuple[float, float], angle_deg: float
 
 def _label(
     owner_id: UUID | None, text: str, position: Point, *, anchor: str = "middle",
-    size_pt: float = 7.5, weight: str = "normal", color: str = "#172033",
+    size_pt: float = 9.0, weight: str = "normal", color: str = "#172033",
     priority: int = 50, role: str = "annotations", label_key: str = "label",
 ) -> EngineeringLabel:
     label_id = uuid5(NAMESPACE_URL, f"urn:pfa:diagram-label:{owner_id}:{label_key}")
-    return EngineeringLabel(owner_id, text, position, anchor, label_id, "STIX Two Text",
+    return EngineeringLabel(owner_id, text, position, anchor, label_id, "Segoe UI",
                              size_pt, weight, color, 0.0, True, role, priority)
 
 
@@ -421,7 +421,7 @@ def _layout_equipment_label(
     elif state == "partial-data":
         name = f"{name}‡"
     return (_label(equipment_id, name, label_anchor, anchor=anchor,
-                   size_pt=7.4, weight="semibold", priority=20,
+                   size_pt=9.0, weight="semibold", priority=20,
                    label_key="equipment-name"),)
 
 
@@ -688,8 +688,8 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
             # Put both identifiers beyond the physical right end of the bar.
             # This keeps bay drops and junctions clear of bus names/voltages.
             label_x = bus.bounds.right + 12.0
-            name_position = Point(label_x, bus.center.y - 8.0)
-            voltage_position = Point(label_x, bus.center.y + 15.0)
+            name_position = Point(label_x, bus.center.y - 9.0)
+            voltage_position = Point(label_x, bus.center.y + 18.0)
             name_anchor = voltage_anchor = "start"
         else:
             label_x = bus.center.x - 16.0
@@ -697,10 +697,10 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
             voltage_position = Point(label_x, bus.center.y + bus.bounds.height / 2.0 + 19.0)
             name_anchor = voltage_anchor = "end"
         labels.append(_label(bus.bus_id, bus.name, name_position, anchor=name_anchor,
-                             size_pt=7.5, weight="semibold", priority=10,
+                             size_pt=9.0, weight="semibold", priority=10,
                              label_key="bus-name"))
         labels.append(_label(bus.bus_id, f"{bus.nominal_voltage_kv:g} kV", voltage_position,
-                             anchor=voltage_anchor, size_pt=6.8, color="#526273", priority=40,
+                             anchor=voltage_anchor, size_pt=8.2, color="#526273", priority=40,
                              label_key="bus-voltage"))
 
     for equipment in network.equipment:
@@ -812,14 +812,14 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
         if unresolved_count:
             labels.append(_label(
                 None, "† Equipment parameters unresolved", Point(left_x, legend_y),
-                anchor="start", size_pt=6.2, color="#8A5A12", priority=90,
+                anchor="start", size_pt=8.0, color="#8A5A12", priority=90,
                 label_key=f"document-note:{network.id}:unresolved",
             ))
             legend_y += 17.0
         if partial_count:
             labels.append(_label(
                 None, "‡ Sequence-network data incomplete", Point(left_x, legend_y),
-                anchor="start", size_pt=6.2, color="#8A5A12", priority=91,
+                anchor="start", size_pt=8.0, color="#8A5A12", priority=91,
                 label_key=f"document-note:{network.id}:sequence",
             ))
 

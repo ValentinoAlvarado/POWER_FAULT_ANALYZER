@@ -97,8 +97,8 @@ def test_all_movable_sld_items_snap_to_workspace_grid_during_drag_only():
 
         # Interactive dragging must settle on the same grid as the canvas.
         symbol._dragging = True
-        symbol.setPos(QPointF(37.0, 53.0))
-        assert symbol.pos() == QPointF(40.0, 60.0), type(symbol).__name__
+        symbol.setPos(QPointF(59.0, 73.0))
+        assert symbol.pos() == QPointF(60.0, 80.0), type(symbol).__name__
         symbol._dragging = False
 
     assert app is QApplication.instance()

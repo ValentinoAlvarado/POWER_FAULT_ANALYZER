@@ -67,3 +67,38 @@ def test_qgraphicsobject_symbols_initialize_and_emit_their_native_signals():
         assert symbol._initializing is False
 
     assert app is QApplication.instance()
+
+
+def test_all_movable_sld_items_snap_to_workspace_grid_during_drag_only():
+    app = _application()
+    symbols = (
+        BusSymbol(
+            uuid4(), "BUS-SNAP", 13.8, True, BusKind.BUSBAR,
+            180.0, grid_spacing=20.0,
+        ),
+        CanonicalEquipmentSymbol(
+            uuid4(), "CB-SNAP", "circuit_breaker", "closed", 32.0, 24.0,
+            snap_enabled=True, grid_spacing=20.0,
+        ),
+        SourceSymbol(
+            uuid4(), "GEN-SNAP", "synchronous_generator",
+            snap_enabled=True, grid_spacing=20.0,
+        ),
+        BranchSymbol(
+            uuid4(), "LINE-SNAP", QPointF(0.0, 0.0), QPointF(100.0, 0.0), "",
+            snap_enabled=True, grid_spacing=20.0,
+        ),
+    )
+
+    for symbol in symbols:
+        # Initial/model-driven placement must preserve its stored coordinates.
+        symbol.setPos(QPointF(37.0, 53.0))
+        assert symbol.pos() == QPointF(37.0, 53.0), type(symbol).__name__
+
+        # Interactive dragging must settle on the same grid as the canvas.
+        symbol._dragging = True
+        symbol.setPos(QPointF(37.0, 53.0))
+        assert symbol.pos() == QPointF(40.0, 60.0), type(symbol).__name__
+        symbol._dragging = False
+
+    assert app is QApplication.instance()

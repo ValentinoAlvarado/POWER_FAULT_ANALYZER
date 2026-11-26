@@ -1432,6 +1432,7 @@ class NetworkCanvasView(QGraphicsView):
             self._bus_items.get(identifier)
             or self._source_items.get(identifier)
             or self._equipment_items.get(identifier)
+            or self._branch_items.get(identifier)
             or self._draft_symbol_items.get(identifier)
         )
         if item is None:

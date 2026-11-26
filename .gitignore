@@ -29,3 +29,22 @@ outputs/
 # OS
 .DS_Store
 Thumbs.db
+
+# PFA publication hygiene: internal installers, backups and local reports
+*.nd015-ruff-backup
+*.nd014-final-backup
+*.nd016-ruff-cli-backup
+ruff-report.json
+artifacts/
+PFA_*.zip
+PFA_*.patch
+INSTALL_PFA_*.ps1
+UNINSTALL_PFA_*.ps1
+APPLY_PFA_*.ps1
+PFA_DESKTOP_*.ps1
+RENDER_PFA_*.py
+PFA_AUTOMATION_RENDER_FIX_001_README.md
+PFA_CODE_AUTOMATION_STUDIO_001_README.md
+README_PFA_PRODUCT_CONSOLIDATED_001.md
+PFA_ES_002_README.md
+docs/history/integration-ledger/

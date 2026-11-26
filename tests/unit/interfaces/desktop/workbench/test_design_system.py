@@ -35,7 +35,11 @@ def test_stylesheet_resolves_every_semantic_token(theme: str) -> None:
     stylesheet = stylesheet_for_theme(theme)
 
     assert "QDockWidget::title" in stylesheet
+    assert "QDockWidget > QWidget" in stylesheet
+    assert "QWidget#WorkbenchPanelContent" in stylesheet
     assert "QToolBar#EngineeringCommandBar" in stylesheet
+    assert "min-height: 32px" in stylesheet
+    assert "padding: 2px 5px" in stylesheet
     assert "QLabel#CommandSectionLabel" in stylesheet
     assert "QTreeWidget::item:selected" in stylesheet
     assert "QLineEdit:focus" in stylesheet

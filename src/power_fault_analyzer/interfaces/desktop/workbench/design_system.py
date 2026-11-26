@@ -459,6 +459,28 @@ QFrame#CanvasWelcomeCard, QFrame#SymbolPreviewFrame {
     border: 1px solid @border@;
     border-radius: 9px;
 }
+QWidget#InspectorEmptyContainer {
+    background: transparent;
+}
+QFrame#InspectorEmptyState {
+    background: @panel_elevated@;
+    border: 1px dashed @border_strong@;
+    border-radius: 8px;
+}
+QLabel#InspectorEmptyEyebrow {
+    color: @accent@;
+    font-size: 8pt;
+    font-weight: 700;
+}
+QLabel#InspectorEmptyTitle {
+    color: @text@;
+    font-size: 12pt;
+    font-weight: 650;
+}
+QLabel#InspectorEmptyDescription {
+    color: @text_muted@;
+    font-size: 9pt;
+}
 QLabel#CandidateStatus {
     background: @panel_elevated@;
     color: @warning@;

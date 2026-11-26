@@ -16,9 +16,9 @@ def test_dark_palette_defines_dark_shell_and_neutral_engineering_canvas() -> Non
     palette = palette_for_theme("dark")
 
     assert palette == DARK_PALETTE
-    assert palette.window == "#151C25"
-    assert palette.panel == "#1E2936"
-    assert palette.canvas == "#F4F7FA"
+    assert palette.window == "#111922"
+    assert palette.panel == "#192431"
+    assert palette.canvas == "#F5F7F9"
     assert palette.canvas_grid_minor != palette.canvas_grid_major
 
 

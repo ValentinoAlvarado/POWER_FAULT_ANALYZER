@@ -1,0 +1,384 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_id": "PFA-ND016-ANALYTICAL-FAULTS-001",
+  "basis": "Academic closed-form symmetrical-components reference cases; not IEC 60909 normative benchmark values.",
+  "created_for": "POWER_FAULT_ANALYZER ND-016",
+  "reference_cases": [
+    {
+      "case_id": "REF-3PH-001",
+      "title": "Three-phase bolted-equivalent network fault with complex fault impedance",
+      "fault_type": "three_phase",
+      "fault_impedance_pu": [
+        0.025,
+        0.07
+      ],
+      "reference_method": "positive_sequence_thevenin",
+      "reference_equation": "I1 = E1 / (Z1 + Zf); I2 = I0 = 0",
+      "assumptions": [
+        "Single Thevenin equivalent represented by one Norton shunt in each sequence network.",
+        "Positive-sequence prefault voltage is supplied; negative- and zero-sequence source voltages are zero.",
+        "The sequence-network impedances are the declared reference inputs, not inferred from a physical plant.",
+        "Reference currents are derived from closed-form symmetrical-component equations independently of ShortCircuitSolver."
+      ],
+      "network": {
+        "base_power_mva": 100.0,
+        "base_voltage_ll_kv": 13.8,
+        "prefault_positive_voltage_pu": [
+          1.02,
+          0.025
+        ],
+        "sequence_impedances_pu": {
+          "zero": [
+            0.18,
+            0.52
+          ],
+          "positive": [
+            0.08,
+            0.24
+          ],
+          "negative": [
+            0.11,
+            0.31
+          ]
+        }
+      },
+      "expected": {
+        "sequence_currents_pu": {
+          "zero": [
+            0.0,
+            0.0
+          ],
+          "positive": [
+            1.0721120186697783,
+            -2.927187864644107
+          ],
+          "negative": [
+            0.0,
+            0.0
+          ]
+        },
+        "phase_currents_pu": [
+          [
+            1.0721120186697783,
+            -2.927187864644107
+          ],
+          [
+            -3.0710750617662104,
+            0.5351176884514103
+          ],
+          [
+            1.9989630430964327,
+            2.3920701761926972
+          ]
+        ],
+        "phase_currents_ka": [
+          [
+            4.485392482466881,
+            -12.246468852325224
+          ],
+          [
+            -12.848449374001943,
+            2.2387705904025506
+          ],
+          [
+            8.363056891535065,
+            10.007698261922675
+          ]
+        ],
+        "ground_current_pu": [
+          0.0,
+          0.0
+        ],
+        "base_current_ka": 4.183697602823375
+      },
+      "tolerances": {
+        "complex_abs_pu": 1e-09,
+        "complex_abs_ka": 1e-08,
+        "scalar_abs": 1e-10,
+        "relative": 1e-09
+      }
+    },
+    {
+      "case_id": "REF-SLG-001",
+      "title": "Single-line-to-ground fault on phase A",
+      "fault_type": "single_line_to_ground",
+      "fault_impedance_pu": [
+        0.03,
+        0.04
+      ],
+      "reference_method": "equal_sequence_currents",
+      "reference_equation": "I0 = I1 = I2 = E1 / (Z0 + Z1 + Z2 + 3 Zf)",
+      "assumptions": [
+        "Single Thevenin equivalent represented by one Norton shunt in each sequence network.",
+        "Positive-sequence prefault voltage is supplied; negative- and zero-sequence source voltages are zero.",
+        "The sequence-network impedances are the declared reference inputs, not inferred from a physical plant.",
+        "Reference currents are derived from closed-form symmetrical-component equations independently of ShortCircuitSolver."
+      ],
+      "network": {
+        "base_power_mva": 100.0,
+        "base_voltage_ll_kv": 13.8,
+        "prefault_positive_voltage_pu": [
+          1.02,
+          0.025
+        ],
+        "sequence_impedances_pu": {
+          "zero": [
+            0.18,
+            0.52
+          ],
+          "positive": [
+            0.08,
+            0.24
+          ],
+          "negative": [
+            0.11,
+            0.31
+          ]
+        }
+      },
+      "expected": {
+        "sequence_currents_pu": {
+          "zero": [
+            0.3065368311113842,
+            -0.7386496283098852
+          ],
+          "positive": [
+            0.3065368311113842,
+            -0.7386496283098852
+          ],
+          "negative": [
+            0.3065368311113842,
+            -0.7386496283098852
+          ]
+        },
+        "phase_currents_pu": [
+          [
+            0.9196104933341526,
+            -2.215948884929656
+          ],
+          [
+            2.220446049250313e-16,
+            1.1102230246251565e-16
+          ],
+          [
+            2.220446049250313e-16,
+            1.1102230246251565e-16
+          ]
+        ],
+        "phase_currents_ka": [
+          [
+            3.8473722164933153,
+            -9.27086003785933
+          ],
+          [
+            9.289674813447168e-16,
+            4.644837406723584e-16
+          ],
+          [
+            9.289674813447168e-16,
+            4.644837406723584e-16
+          ]
+        ],
+        "ground_current_pu": [
+          0.9196104933341526,
+          -2.215948884929656
+        ],
+        "base_current_ka": 4.183697602823375
+      },
+      "tolerances": {
+        "complex_abs_pu": 1e-09,
+        "complex_abs_ka": 1e-08,
+        "scalar_abs": 1e-10,
+        "relative": 1e-09
+      }
+    },
+    {
+      "case_id": "REF-LL-001",
+      "title": "Line-to-line fault between phases B and C",
+      "fault_type": "line_to_line",
+      "fault_impedance_pu": [
+        0.02,
+        0.06
+      ],
+      "reference_method": "positive_negative_sequence_pair",
+      "reference_equation": "I1 = E1 / (Z1 + Z2 + Zf); I2 = -I1; I0 = 0",
+      "assumptions": [
+        "Single Thevenin equivalent represented by one Norton shunt in each sequence network.",
+        "Positive-sequence prefault voltage is supplied; negative- and zero-sequence source voltages are zero.",
+        "The sequence-network impedances are the declared reference inputs, not inferred from a physical plant.",
+        "Reference currents are derived from closed-form symmetrical-component equations independently of ShortCircuitSolver."
+      ],
+      "network": {
+        "base_power_mva": 100.0,
+        "base_voltage_ll_kv": 13.8,
+        "prefault_positive_voltage_pu": [
+          1.02,
+          0.025
+        ],
+        "sequence_impedances_pu": {
+          "zero": [
+            0.18,
+            0.52
+          ],
+          "positive": [
+            0.08,
+            0.24
+          ],
+          "negative": [
+            0.11,
+            0.31
+          ]
+        }
+      },
+      "expected": {
+        "sequence_currents_pu": {
+          "zero": [
+            0.0,
+            0.0
+          ],
+          "positive": [
+            0.5512974531475251,
+            -1.4823402210475731
+          ],
+          "negative": [
+            -0.5512974531475251,
+            1.4823402210475731
+          ]
+        },
+        "phase_currents_pu": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            -2.567488576957277,
+            -0.9548751989348352
+          ],
+          [
+            2.567488576957277,
+            0.9548751989348352
+          ]
+        ],
+        "phase_currents_ka": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            -10.741595804692558,
+            -3.994909080779163
+          ],
+          [
+            10.741595804692558,
+            3.994909080779163
+          ]
+        ],
+        "ground_current_pu": [
+          0.0,
+          0.0
+        ],
+        "base_current_ka": 4.183697602823375
+      },
+      "tolerances": {
+        "complex_abs_pu": 1e-09,
+        "complex_abs_ka": 1e-08,
+        "scalar_abs": 1e-10,
+        "relative": 1e-09
+      }
+    },
+    {
+      "case_id": "REF-DLG-001",
+      "title": "Double-line-to-ground fault on phases B and C",
+      "fault_type": "double_line_to_ground",
+      "fault_impedance_pu": [
+        0.015,
+        0.055
+      ],
+      "reference_method": "three_sequence_boundary_solution",
+      "reference_equation": "Solve the exact B-C-G sequence-network boundary conditions",
+      "assumptions": [
+        "Single Thevenin equivalent represented by one Norton shunt in each sequence network.",
+        "Positive-sequence prefault voltage is supplied; negative- and zero-sequence source voltages are zero.",
+        "The sequence-network impedances are the declared reference inputs, not inferred from a physical plant.",
+        "Reference currents are derived from closed-form symmetrical-component equations independently of ShortCircuitSolver."
+      ],
+      "network": {
+        "base_power_mva": 100.0,
+        "base_voltage_ll_kv": 13.8,
+        "prefault_positive_voltage_pu": [
+          1.02,
+          0.025
+        ],
+        "sequence_impedances_pu": {
+          "zero": [
+            0.18,
+            0.52
+          ],
+          "positive": [
+            0.08,
+            0.24
+          ],
+          "negative": [
+            0.11,
+            0.31
+          ]
+        }
+      },
+      "expected": {
+        "sequence_currents_pu": {
+          "zero": [
+            -0.21986100829869756,
+            0.6303063222424109
+          ],
+          "positive": [
+            0.734267297320682,
+            -2.000125244212863
+          ],
+          "negative": [
+            -0.5144062890219843,
+            1.369818921970452
+          ]
+        },
+        "phase_currents_pu": [
+          [
+            1.1102230246251565e-16,
+            0.0
+          ],
+          [
+            -3.248248769697965,
+            -0.135923563443753
+          ],
+          [
+            2.5886657448018724,
+            2.0268425301709865
+          ]
+        ],
+        "phase_currents_ka": [
+          [
+            4.644837406723584e-16,
+            0.0
+          ],
+          [
+            -13.589690591159354,
+            -0.5686630865468404
+          ],
+          [
+            10.83019467103858,
+            8.479696234776819
+          ]
+        ],
+        "ground_current_pu": [
+          -0.6595830248960927,
+          1.8909189667272326
+        ],
+        "base_current_ka": 4.183697602823375
+      },
+      "tolerances": {
+        "complex_abs_pu": 1e-09,
+        "complex_abs_ka": 1e-08,
+        "scalar_abs": 1e-10,
+        "relative": 1e-09
+      }
+    }
+  ]
+}

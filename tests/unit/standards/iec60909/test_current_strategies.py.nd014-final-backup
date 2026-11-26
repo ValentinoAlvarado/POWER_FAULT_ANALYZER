@@ -1,0 +1,206 @@
+"""Analytical tests for the ND-014.4 current calculation policies."""
+
+from __future__ import annotations
+
+import math
+
+import pytest
+
+from power_fault_analyzer.domain.enums.fault_type import FaultType
+from power_fault_analyzer.standards.iec60909.current_calculation import (
+    calculate_network_feeder_breaking_current,
+    calculate_network_feeder_steady_state_current,
+    calculate_single_fed_three_phase_dc_and_asymmetrical_breaking,
+    calculate_single_fed_three_phase_peak_current,
+    initial_symmetrical_current_method_id,
+    unavailable_dc_and_asymmetrical_breaking_results,
+)
+from power_fault_analyzer.standards.iec60909.models import (
+    IEC60909CalculationQuantity,
+    IEC60909QuantityStatus,
+    IEC60909SourceFamily,
+)
+
+
+def test_single_fed_three_phase_peak_strategy_matches_existing_radial_method():
+    initial = 12.5
+    impedance = 0.08 + 0.24j
+
+    outcome = calculate_single_fed_three_phase_peak_current(initial, impedance)
+
+    expected_factor = 1.02 + 0.98 * math.exp(-3.0 * 0.08 / 0.24)
+    assert outcome.factor == pytest.approx(expected_factor)
+    assert outcome.result.quantity is IEC60909CalculationQuantity.PEAK_CURRENT
+    assert outcome.result.status is IEC60909QuantityStatus.CALCULATED
+    assert outcome.result.value == pytest.approx(expected_factor * math.sqrt(2.0) * initial)
+    assert outcome.result.method_id.endswith("/8.1/single-fed-three-phase-radial-network-feeder")
+
+
+def test_single_fed_peak_strategy_rejects_non_passive_or_non_inductive_impedance():
+    with pytest.raises(ValueError, match="R >= 0 and X > 0"):
+        calculate_single_fed_three_phase_peak_current(10.0, -0.01 + 0.2j)
+    with pytest.raises(ValueError, match="R >= 0 and X > 0"):
+        calculate_single_fed_three_phase_peak_current(10.0, 0.1 + 0.0j)
+
+
+def test_breaking_current_strategy_distinguishes_single_and_multiple_network_feeders():
+    single = calculate_network_feeder_breaking_current(
+        10.0,
+        (IEC60909SourceFamily.NETWORK_FEEDER,),
+        FaultType.THREE_PHASE,
+    )
+    multiple = calculate_network_feeder_breaking_current(
+        20.0,
+        (
+            IEC60909SourceFamily.NETWORK_FEEDER,
+            IEC60909SourceFamily.NETWORK_FEEDER,
+        ),
+        FaultType.THREE_PHASE,
+    )
+
+    assert single.value == pytest.approx(10.0)
+    assert single.method_id.endswith("/9.1.5/network-feeder-contribution")
+    assert multiple.value == pytest.approx(20.0)
+    assert multiple.method_id.endswith("/9.2/network-feeder-contribution")
+
+
+def test_unbalanced_breaking_current_is_available_for_network_feeders_only():
+    result = calculate_network_feeder_breaking_current(
+        7.5,
+        (IEC60909SourceFamily.NETWORK_FEEDER,),
+        FaultType.SINGLE_LINE_TO_GROUND,
+    )
+
+    assert result.status is IEC60909QuantityStatus.CALCULATED
+    assert result.value == pytest.approx(7.5)
+    assert result.method_id.endswith("/9.3/unbalanced-network-feeder-contributions")
+
+
+def test_breaking_strategy_does_not_apply_network_feeder_method_to_machines():
+    result = calculate_network_feeder_breaking_current(
+        10.0,
+        (IEC60909SourceFamily.SYNCHRONOUS_MACHINE,),
+        FaultType.THREE_PHASE,
+    )
+
+    assert result.status is IEC60909QuantityStatus.UNAVAILABLE
+    assert result.value is None
+    assert "source-specific Clause 9" in result.reason
+
+
+def test_steady_state_strategy_selects_single_and_multiple_network_feeder_clauses():
+    single = calculate_network_feeder_steady_state_current(
+        8.0,
+        (IEC60909SourceFamily.NETWORK_FEEDER,),
+        FaultType.THREE_PHASE,
+    )
+    multiple = calculate_network_feeder_steady_state_current(
+        12.0,
+        (
+            IEC60909SourceFamily.NETWORK_FEEDER,
+            IEC60909SourceFamily.NETWORK_FEEDER,
+        ),
+        FaultType.THREE_PHASE,
+    )
+    unbalanced = calculate_network_feeder_steady_state_current(
+        8.0,
+        (IEC60909SourceFamily.NETWORK_FEEDER,),
+        FaultType.LINE_TO_LINE,
+    )
+
+    assert single.value == pytest.approx(8.0)
+    assert single.method_id.endswith("/11.2.5/network-feeder-contribution")
+    assert multiple.value == pytest.approx(12.0)
+    assert multiple.method_id.endswith("/11.2.6/network-feeder-contribution")
+    assert unbalanced.status is IEC60909QuantityStatus.CALCULATED
+    assert unbalanced.value == pytest.approx(8.0)
+    assert unbalanced.method_id.endswith("/11.3/unbalanced-network-feeder-contributions")
+
+
+def test_dc_and_asymmetrical_breaking_outputs_are_explicitly_unavailable():
+    dc_result, asymmetrical_result = unavailable_dc_and_asymmetrical_breaking_results(
+        "Opening-time data is missing."
+    )
+
+    assert dc_result.quantity is IEC60909CalculationQuantity.DC_COMPONENT
+    assert asymmetrical_result.quantity is IEC60909CalculationQuantity.ASYMMETRICAL_BREAKING_CURRENT
+    assert dc_result.status is IEC60909QuantityStatus.UNAVAILABLE
+    assert asymmetrical_result.status is IEC60909QuantityStatus.UNAVAILABLE
+    assert dc_result.value is None
+    assert asymmetrical_result.value is None
+
+
+def test_single_fed_three_phase_dc_and_asymmetrical_breaking_matches_r_x_decay():
+    outcome = calculate_single_fed_three_phase_dc_and_asymmetrical_breaking(
+        initial_current_ka=10.0,
+        breaking_current_ka=10.0,
+        positive_sequence_thevenin_impedance_pu=0.08 + 0.24j,
+        frequency_hz=50.0,
+        first_pole_contact_separation_time_s=0.10,
+    )
+    expected_dc = math.sqrt(2.0) * 10.0 * math.exp(-2.0 * math.pi * 50.0 * 0.10 * (0.08 / 0.24))
+    assert outcome.dc_component_ka == pytest.approx(expected_dc)
+    assert outcome.asymmetrical_breaking_current_ka == pytest.approx(math.hypot(10.0, expected_dc))
+    assert outcome.method_id == (
+        "PFA-ENGINEERING/RX-DC-DECAY/single-fed-three-phase-network-feeder/v1"
+    )
+
+
+def test_single_fed_three_phase_dc_strategy_rejects_invalid_r_x_and_frequency():
+    with pytest.raises(ValueError, match="R >= 0 and X > 0"):
+        calculate_single_fed_three_phase_dc_and_asymmetrical_breaking(
+            initial_current_ka=10.0,
+            breaking_current_ka=10.0,
+            positive_sequence_thevenin_impedance_pu=0.1 + 0.0j,
+            frequency_hz=50.0,
+            first_pole_contact_separation_time_s=0.1,
+        )
+    with pytest.raises(ValueError, match="50 Hz or 60 Hz"):
+        calculate_single_fed_three_phase_dc_and_asymmetrical_breaking(
+            initial_current_ka=10.0,
+            breaking_current_ka=10.0,
+            positive_sequence_thevenin_impedance_pu=0.1 + 0.2j,
+            frequency_hz=400.0,
+            first_pole_contact_separation_time_s=0.1,
+        )
+
+
+@pytest.mark.parametrize(
+    ("fault_type", "clause"),
+    [
+        (FaultType.THREE_PHASE, "7.2/three-phase"),
+        (FaultType.LINE_TO_LINE, "7.3/line-to-line"),
+        (FaultType.DOUBLE_LINE_TO_GROUND, "7.4/line-to-line-with-earth"),
+        (FaultType.SINGLE_LINE_TO_GROUND, "7.5/line-to-earth"),
+    ],
+)
+def test_initial_symmetrical_current_method_trace_maps_each_fault_clause(fault_type, clause):
+    assert initial_symmetrical_current_method_id(fault_type).endswith(
+        f"{clause}/initial-symmetrical-current"
+    )
+
+
+def test_single_fed_dc_estimate_allows_numerical_underflow_to_zero():
+    outcome = calculate_single_fed_three_phase_dc_and_asymmetrical_breaking(
+        initial_current_ka=10.0,
+        breaking_current_ka=10.0,
+        positive_sequence_thevenin_impedance_pu=0.1 + 0.2j,
+        frequency_hz=60.0,
+        first_pole_contact_separation_time_s=1000.0,
+    )
+
+    assert outcome.dc_component_ka == 0.0
+    assert outcome.asymmetrical_breaking_current_ka == pytest.approx(10.0)
+
+
+def test_single_fed_dc_estimate_allows_numerical_underflow_to_zero():
+    outcome = calculate_single_fed_three_phase_dc_and_asymmetrical_breaking(
+        initial_current_ka=10.0,
+        breaking_current_ka=10.0,
+        positive_sequence_thevenin_impedance_pu=0.1 + 0.2j,
+        frequency_hz=60.0,
+        first_pole_contact_separation_time_s=1000.0,
+    )
+
+    assert outcome.dc_component_ka == 0.0
+    assert outcome.asymmetrical_breaking_current_ka == pytest.approx(10.0)

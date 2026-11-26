@@ -1,0 +1,67 @@
+name: Windows desktop release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      PFA_RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: x64
+          cache: pip
+      - name: Install NSIS compiler
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { throw "NSIS compiler was not installed." }
+      - name: Acquire pinned QElectroTech symbol assets
+        shell: pwsh
+        run: ./scripts/Acquire-QElectroTechSymbolSeed.ps1
+      - name: Build, test and package Windows application
+        shell: pwsh
+        run: ./scripts/build_windows_release.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: POWER-FAULT-ANALYZER-Windows-${{ github.ref_name }}
+          if-no-files-found: error
+          path: |
+            dist/release/PFA-Setup-x64.exe
+            dist/release/PFA-Windows-x64.zip
+            dist/release/SHA256SUMS.txt
+            dist/release/SBOM.cdx.json
+            dist/release/PYTHON-DEPENDENCY-LICENSES.md
+            dist/release/THIRD_PARTY_NOTICES.md
+            dist/release/BUILD-INFO.json
+      - name: Require reviewed licenses for packages without metadata
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          python scripts/verify_release_license_review.py --inventory dist/release/PYTHON-DEPENDENCY-LICENSES.md --review RELEASE_LICENSE_REVIEW.csv
+      - name: Publish GitHub Release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: POWER_FAULT_ANALYZER ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            dist/release/PFA-Setup-x64.exe
+            dist/release/PFA-Windows-x64.zip
+            dist/release/SHA256SUMS.txt
+            dist/release/SBOM.cdx.json
+            dist/release/PYTHON-DEPENDENCY-LICENSES.md
+            dist/release/THIRD_PARTY_NOTICES.md
+            dist/release/BUILD-INFO.json

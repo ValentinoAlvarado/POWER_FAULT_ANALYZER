@@ -1,0 +1,8 @@
+src/power_fault_analyzer/interfaces/desktop/workbench/network_canvas.py
+src/power_fault_analyzer/scripting/__init__.py
+src/power_fault_analyzer/scripting/project.py
+tests/unit/scripting/test_script_project.py
+examples/automation/substation_60kv.py
+docs/engineering/CODE_AUTOMATION_API.md
+PFA_AUTOMATION_RENDER_FIX_001_README.md
+PATCH_MANIFEST.txt

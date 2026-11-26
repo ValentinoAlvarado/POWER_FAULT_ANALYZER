@@ -1,0 +1,22 @@
+library,domain,license,decision,package_or_source,integration_status,scope_boundary
+PySide6 / Qt for Python,desktop UI,LGPLv3 GPLv3 or commercial,adopt,PySide6,implemented,Review LGPL obligations for every distributed Qt module
+QtAwesome,iconography,MIT wrapper plus upstream icon/font licenses,adopt,QtAwesome,integrated in desktop toolbar palette explorer and tabs,Font Awesome Free icon assets CC BY 4.0 and fonts SIL OFL 1.1
+QElectroTech Elements,electrical symbols,CC BY 3.0,adopt curated assets,qelectrotech/qelectrotech-elements,manifest importer and pinned hash-verifying acquisition workflow,Elements remain candidates until normative and terminal mapping verification
+QtSvg,vector graphics,Qt licensing,adopt,PySide6.QtSvg,implemented,SVG rendering does not confer IEC symbol conformity
+PyQtGraph,scientific visualization,MIT,adopt,pyqtgraph,existing desktop dependency and results workspace,Use for interactive curves and signals
+Matplotlib,scientific/report graphics,PSF-based,adopt,matplotlib,existing desktop dependency,Static plots and report figures
+NumPy,numerical computing,BSD-3-Clause,adopt,numpy,existing core dependency,Arrays and linear algebra primitives
+SciPy,numerical computing,BSD-3-Clause,adopt,scipy,existing core dependency,Sparse solvers and numerical methods
+NetworkX,network topology,BSD-3-Clause,adopt,networkx,existing core dependency,Graph utility only; domain topology remains authoritative
+Pint,engineering units,BSD-3-Clause,adopt,pint,existing core dependency,Explicit unit conversion and dimensional validation
+pandas,engineering data,BSD-3-Clause,adopt,pandas,existing core dependency,Tabular measurement and report data
+Pydantic,data contracts,MIT,adopt,pydantic,existing core dependency,Validation at input and integration boundaries
+ReportLab,report generation,BSD-3-Clause,adopt,reportlab,existing reports extra,PDF export
+openpyxl,spreadsheet exchange,MIT,adopt,openpyxl,existing reports extra,XLSX export
+ezdxf,CAD exchange,MIT,optional adoption,ezdxf,optional cad extra only,DXF semantics and round-trip still require an adapter and acceptance tests
+PyVista,3D visualization,MIT,optional adoption,pyvista,optional visualization3d extra only,No 3D electrical engineering workflow claimed
+VTK,3D visualization,BSD-3-Clause,transitive dependency,vtk,provided by PyVista extra,Retain exact VTK notices in release SBOM
+trimesh,mesh exchange,MIT,optional adoption,trimesh,optional visualization3d extra only,Mesh preprocessing only until model contracts exist
+pytest-qt,GUI testing,MIT,adopt,pytest-qt,development dependency,Qt widget tests and event-loop assertions
+pytest,testing,MIT,adopt,pytest,development dependency,Automated regression
+Ruff,static analysis and formatting,MIT,adopt,ruff,development dependency,Lint and deterministic formatting

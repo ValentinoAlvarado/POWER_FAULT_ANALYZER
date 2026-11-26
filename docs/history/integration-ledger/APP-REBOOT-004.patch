@@ -1,0 +1,2220 @@
+From fe660f789d52547fc8388a6ecf43916147a31ae3 Mon Sep 17 00:00:00 2001
+From: OpenAI Engineering Assistant <engineering-assistant@openai.com>
+Date: Mon, 23 Nov 2026 20:05:22 +0000
+Subject: [PATCH] feat(desktop): add resizable workspace and rotatable source
+ symbols
+
+---
+ .github/workflows/pages.yml                   |  33 ++
+ .github/workflows/windows-release.yml         |  40 ++
+ README.md                                     |   5 +
+ docs/product/DISTRIBUTION_AND_RELEASES.md     |  24 +
+ .../PRODUCT_DIRECTION_POWER_SYSTEM_EDITOR.md  |  14 +-
+ pyproject.toml                                |   1 +
+ scripts/build_windows_release.ps1             |  86 +++
+ scripts/smoke_test_app_reboot_004.py          | 101 ++++
+ scripts/verify_app_reboot_004.ps1             |  23 +
+ .../use_cases/network_workspace.py            |  82 ++-
+ .../json_network_document_repository.py       |  25 +-
+ .../desktop/workbench/network_canvas.py       | 121 +++-
+ .../desktop/workbench/qet_symbol_browser.py   | 103 +++-
+ .../desktop/workbench/qet_symbol_item.py      |  71 ++-
+ .../desktop/workbench/workbench_window.py     | 550 ++++++++++++++++--
+ .../test_workbench_network_workspace.py       |  52 ++
+ .../desktop/workbench/test_qet_symbol_item.py |  59 +-
+ website/index.html                            |  32 +
+ website/release.js                            |  33 ++
+ website/styles.css                            |   2 +
+ 20 files changed, 1364 insertions(+), 93 deletions(-)
+ create mode 100644 .github/workflows/pages.yml
+ create mode 100644 .github/workflows/windows-release.yml
+ create mode 100644 docs/product/DISTRIBUTION_AND_RELEASES.md
+ create mode 100644 scripts/build_windows_release.ps1
+ create mode 100644 scripts/smoke_test_app_reboot_004.py
+ create mode 100644 scripts/verify_app_reboot_004.ps1
+ create mode 100644 website/index.html
+ create mode 100644 website/release.js
+ create mode 100644 website/styles.css
+
+diff --git a/.github/workflows/pages.yml b/.github/workflows/pages.yml
+new file mode 100644
+index 0000000..4221b04
+--- /dev/null
++++ b/.github/workflows/pages.yml
+@@ -0,0 +1,33 @@
++name: Deploy product download page
++
++on:
++  workflow_dispatch:
++  push:
++    branches: [main, product-reboot]
++    paths:
++      - "website/**"
++      - ".github/workflows/pages.yml"
++
++permissions:
++  contents: read
++  pages: write
++  id-token: write
++
++concurrency:
++  group: pages
++  cancel-in-progress: true
++
++jobs:
++  deploy:
++    environment:
++      name: github-pages
++      url: ${{ steps.deployment.outputs.page_url }}
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/configure-pages@v5
++      - uses: actions/upload-pages-artifact@v3
++        with:
++          path: website
++      - id: deployment
++        uses: actions/deploy-pages@v4
+diff --git a/.github/workflows/windows-release.yml b/.github/workflows/windows-release.yml
+new file mode 100644
+index 0000000..a3b6f13
+--- /dev/null
++++ b/.github/workflows/windows-release.yml
+@@ -0,0 +1,40 @@
++name: Windows desktop release
++
++on:
++  workflow_dispatch:
++  push:
++    tags:
++      - "v*"
++
++permissions:
++  contents: write
++
++jobs:
++  build-windows-x64:
++    runs-on: windows-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-python@v5
++        with:
++          python-version: "3.13"
++          cache: pip
++      - name: Acquire pinned QElectroTech symbol assets
++        shell: pwsh
++        run: ./scripts/Acquire-QElectroTechSymbolSeed.ps1
++      - name: Build and verify Windows application
++        shell: pwsh
++        run: ./scripts/build_windows_release.ps1
++      - uses: actions/upload-artifact@v4
++        with:
++          name: PFA-Windows-x64
++          path: |
++            dist/release/PFA-Windows-x64.zip
++            dist/release/SHA256SUMS.txt
++      - name: Publish GitHub Release assets
++        if: startsWith(github.ref, 'refs/tags/')
++        uses: softprops/action-gh-release@v2
++        with:
++          generate_release_notes: true
++          files: |
++            dist/release/PFA-Windows-x64.zip
++            dist/release/SHA256SUMS.txt
+diff --git a/README.md b/README.md
+index 9bb307b..7ab7e1e 100644
+--- a/README.md
++++ b/README.md
+@@ -46,6 +46,7 @@ Implemented foundations:
+ 
+ ND-006 adds bus-level short-circuit calculations using sparse Thevenin reduction and sequence-network fault interconnections. ND-007 extends these calculations to interior points of transmission lines and underground cables. The line is identified by equipment UUID, the location is a fraction measured from its FROM terminal, and the solver reports sequence and phase currents/voltages at the fault point and both line terminals. ND-008 adds a separate, restricted IEC 60909-0:2026 path for bolted bus faults supplied by exactly one ExternalGrid network feeder. It includes supported voltage factors, two-winding transformer correction, explicit 50/60 Hz selection, separate engineer-supplied positive/negative and zero-sequence minimum-case line resistance factors, initial symmetrical currents for the four sequence fault types, and radial maximum three-phase peak/thermal quantities. ND-008 is not a full IEC 60909 implementation or a compliance declaration: machine/converter contributions, multiple feeds, meshed peak-current methods, three-winding corrections, line-interior IEC studies and several other standard cases remain unsupported and are rejected or omitted explicitly. ND-009 adds a separate protection layer for 50/51 overcurrent relays, CT ratios, fuse curves, breaker ratings, adiabatic conductor withstand, sensitivity and sampled selectivity checks. It requires manufacturer and project-specific inputs and does not claim full IEC device-standard compliance. ND-013 adds an optional measured/vendor-derived zero-sequence three-port model for three-winding transformers; without it, the zero-sequence network remains explicitly incomplete. Converter sources remain current-capability models rather than fixed Thevenin impedances; a bus-fault study can include one only when an explicit fixed sequence-current command is supplied and validated.
+ 
++
+ ## Environment
+ 
+ Requires Python 3.13.x.
+@@ -173,3 +174,7 @@ python -m power_fault_analyzer.interfaces.desktop.app
+ ```
+ 
+ See `docs/engineering/APP-REBOOT-001-engineering-workbench.md` for implemented scope, limitations and validation evidence.
++
++## Desktop application and releases
++
++POWER_FAULT_ANALYZER is distributed as a native Windows desktop engineering application. The website in `website/` is the public download and release front door; it does not replace the native editor. The current Windows artifact is a portable ZIP bundle, not an MSI installer. See [Desktop distribution and releases](docs/product/DISTRIBUTION_AND_RELEASES.md) for the verified build and publication workflow. Public binary publication is currently blocked until the project license is selected and Qt/PySide6 redistribution obligations are reviewed.
+diff --git a/docs/product/DISTRIBUTION_AND_RELEASES.md b/docs/product/DISTRIBUTION_AND_RELEASES.md
+new file mode 100644
+index 0000000..d2ceb65
+--- /dev/null
++++ b/docs/product/DISTRIBUTION_AND_RELEASES.md
+@@ -0,0 +1,24 @@
++# Desktop distribution and public release page
++
++PFA remains a desktop engineering application. The public website is its distribution and documentation front door; it is not a replacement for the engineering editor.
++
++## Windows package
++
++- The product is distributed as an install-free, standalone Windows x64 desktop folder in a ZIP archive. The website is its download/documentation front door; the engineering editor remains a native desktop application.
++- Python 3.13 x64 is the release build toolchain.
++- The release workflow installs the `desktop`, `reports` and `release` extras.
++- The pinned QElectroTech symbol seed is acquired and hash-verified before packaging.
++- PyInstaller builds an `onedir` application because the Qt plugin/runtime tree is more diagnosable than a one-file executable.
++- The release asset is `PFA-Windows-x64.zip`; it includes the executable, runtime dependencies, source symbol collection, attribution/license notices, and SHA-256 checksum. It is a portable `onedir` ZIP, not an MSI installer; extract the archive and launch `POWER_FAULT_ANALYZER.exe`.
++- A release is published only from a `v*` tag after lint, formatting, compile, tests and QET/Qt smoke checks pass.
++- **Publication is currently license-blocked:** the repository root `LICENSE` file is empty. Do not publish a public binary or describe the application as OSI-licensed open source until the project selects and commits a license and the Qt/PySide6 redistribution obligations are reviewed. QElectroTech element assets retain their separate CC BY 3.0 attribution and terms.
++
++## Website deployment
++
++1. Publish the repository to GitHub.
++2. Edit `website/index.html` and replace `YOUR_GITHUB_OWNER/POWER_FAULT_ANALYZER` with the exact public owner/repository slug.
++3. Enable GitHub Pages with **GitHub Actions** as the build/deployment source.
++4. Push to `main` to deploy the download page.
++5. Create a version tag such as `v0.2.0` to run the verified Windows build and publish the release ZIP.
++
++The download page queries the latest GitHub Release and enables the download only if the expected ZIP asset exists. Until a repository slug and public release are configured, it deliberately shows a non-download state instead of a broken or invented link.
+diff --git a/docs/product/PRODUCT_DIRECTION_POWER_SYSTEM_EDITOR.md b/docs/product/PRODUCT_DIRECTION_POWER_SYSTEM_EDITOR.md
+index 317f311..9512256 100644
+--- a/docs/product/PRODUCT_DIRECTION_POWER_SYSTEM_EDITOR.md
++++ b/docs/product/PRODUCT_DIRECTION_POWER_SYSTEM_EDITOR.md
+@@ -18,7 +18,8 @@ The diagram is a view of the network model. Code is a separate authoring surface
+ 
+ - A busbar is rendered as a busbar, not as a rounded rectangle/card.
+ - Conductors and branches are rendered as electrical connections, not decorative arrows or arbitrary colored connectors.
+-- Equipment symbols must have a documented symbol source, license, provenance, terminal geometry, and explicit mapping to a domain equipment type before insertion is enabled.
++- Equipment symbols used as physical SLD equipment must have a documented symbol source, license, provenance, terminal geometry, and explicit mapping to a domain equipment type before insertion is enabled.
++- Unmapped QElectroTech source candidates may be placed only as explicitly labelled drawing-only reference overlays. They are not physical SLD equipment, never enter topology or solver input, and are excluded from the official SLD SVG export. The library's source-asset status is not an IEC-compliance declaration.
+ - A symbol's visible terminals must map one-to-one to declared electrical terminals. A graphical crossing is not an electrical junction unless the connection model says so.
+ - Bus, branch, generator, transformer, load, shunt, breaker, disconnector, CT/VT, grounding, and protection objects must not be conflated.
+ - Slack/reference-bus status is a study role, not a fabricated physical component.
+@@ -145,4 +146,13 @@ Every export must disclose omitted/unsupported fields. No silent lossy export.
+ 
+ ## 9. Current increment boundary
+ 
+-The current implementation changes only the SLD visual foundation, QET preview fit behavior, and SVG vector export. It does **not** yet implement terminal-aware interactive connectivity, a code DSL/editor, autosave/recovery, PDF drawing sheets, multi-sheet documents, or full IEC/IEEE compliance. These remain explicit future acceptance gates, not implied capabilities.
++APP-REBOOT-003 established the initial SLD visual foundation, QET source preview behavior, and SVG export. APP-REBOOT-004 adds resizable/persistent workspace panels and rotatable drawing-only source candidates. Neither increment implements terminal-aware interactive connectivity, a code DSL/editor, autosave/recovery, PDF drawing sheets, multi-sheet documents, or full IEC/IEEE compliance. These remain explicit future acceptance gates, not implied capabilities.
++
++
++## APP-REBOOT-004 — Resizable workspace, drawing placements and distribution
++
++The engineering workspace uses explicit nested Qt splitters for the project explorer, central drawing/result workspace, and right-side equipment/properties/source-symbol panels. Splitter sizes and window geometry are persisted between sessions and can be reset from View. Panel visibility is controlled through View actions.
++
++QElectroTech source assets can be inserted into the drawing as movable, rotatable, source-pinned **drawing placements**. They are stored in the diagram document and are explicitly marked as not electrically mapped. Inserting a source graphic does not create a domain equipment object, infer terminal connectivity, or enter the short-circuit solver. Rotation and placement changes participate in undo/redo and project persistence.
++
++The release target remains a downloadable desktop application. A Windows x64 PyInstaller `onedir` package, GitHub Release workflow, checksum artifact and GitHub Pages download front door are provided. The download page stays disabled until an exact public repository slug and a verified release asset are configured; no fictional download URL is presented.
+diff --git a/pyproject.toml b/pyproject.toml
+index f6735bc..be4ce6c 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -26,6 +26,7 @@ dev = [
+ notebook = ["jupyterlab>=4.3,<5", "ipykernel>=6.29,<7"]
+ desktop = ["PySide6>=6.8,<7", "matplotlib>=3.10,<4", "pyqtgraph>=0.13,<1"]
+ reports = ["openpyxl>=3.1,<4", "reportlab>=4.2,<5"]
++release = ["pyinstaller>=6.11,<7"]
+ api = [
+     "fastapi>=0.115,<1",
+     "uvicorn[standard]>=0.34,<1",
+diff --git a/scripts/build_windows_release.ps1 b/scripts/build_windows_release.ps1
+new file mode 100644
+index 0000000..6ad6ea7
+--- /dev/null
++++ b/scripts/build_windows_release.ps1
+@@ -0,0 +1,86 @@
++[CmdletBinding()]
++param(
++    [switch]$SkipTests,
++    [string]$OutputDirectory = "dist\release"
++)
++
++$ErrorActionPreference = 'Stop'
++$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
++Set-Location $RepositoryRoot
++
++function Invoke-Checked {
++    param([string]$Name, [scriptblock]$Command)
++    Write-Host "== $Name ==" -ForegroundColor Cyan
++    & $Command
++    if ($LASTEXITCODE -ne 0) {
++        throw "$Name failed with exit code $LASTEXITCODE."
++    }
++}
++
++$pythonVersion = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
++if ($pythonVersion -ne '3.13') {
++    throw "Release build requires Python 3.13; detected $pythonVersion."
++}
++
++$projectLicense = Join-Path $RepositoryRoot 'LICENSE'
++if (-not (Test-Path $projectLicense) -or (Get-Item $projectLicense).Length -eq 0) {
++    throw 'Release blocked: the root LICENSE file is empty. Select and publish the project license and review Qt/PySide6 redistribution obligations before producing a public binary.'
++}
++
++$manifest = Join-Path $RepositoryRoot 'RESEARCH\qelectrotech-symbol-candidates.csv'
++$assetRoot = Join-Path $RepositoryRoot 'assets\third_party\qelectrotech-elements'
++if (-not (Test-Path $manifest)) { throw "Missing pinned QET manifest: $manifest" }
++if (-not (Test-Path (Join-Path $assetRoot 'ELEMENTS.LICENSE'))) {
++    & (Join-Path $PSScriptRoot 'Acquire-QElectroTechSymbolSeed.ps1') -RepositoryRoot $RepositoryRoot
++    if ($LASTEXITCODE -ne 0) { throw 'QET source seed acquisition failed.' }
++}
++
++Invoke-Checked 'Install release dependencies' { python -m pip install -e '.[dev,desktop,reports,release]' }
++if (-not $SkipTests) {
++    Invoke-Checked 'Complete APP-REBOOT-004 quality and desktop acceptance gates' {
++        & (Join-Path $PSScriptRoot 'verify_app_reboot_004.ps1')
++    }
++}
++
++$distRoot = Join-Path $RepositoryRoot 'dist'
++$workPath = Join-Path $distRoot 'pyinstaller-work'
++$specPath = Join-Path $distRoot 'pyinstaller-spec'
++New-Item -ItemType Directory -Force -Path $distRoot | Out-Null
++
++Invoke-Checked 'Build standalone Windows application' {
++    python -m PyInstaller --noconfirm --clean --windowed --onedir `
++        --name POWER_FAULT_ANALYZER `
++        --paths src `
++        --collect-all PySide6 `
++        --collect-all numpy `
++        --collect-all scipy `
++        --collect-all pandas `
++        --collect-all networkx `
++        --collect-all reportlab `
++        --collect-all openpyxl `
++        --collect-all matplotlib `
++        --collect-all pyqtgraph `
++        --add-data "$manifest;RESEARCH" `
++        --add-data "$assetRoot;assets/third_party/qelectrotech-elements" `
++        --workpath $workPath `
++        --specpath $specPath `
++        src/power_fault_analyzer/interfaces/desktop/app.py
++}
++
++$appFolder = Join-Path $distRoot 'POWER_FAULT_ANALYZER'
++if (-not (Test-Path (Join-Path $appFolder 'POWER_FAULT_ANALYZER.exe'))) {
++    throw 'PyInstaller completed without the expected executable.'
++}
++Copy-Item LICENSE $appFolder -Force
++Copy-Item README.md $appFolder -Force
++Copy-Item docs/engineering/THIRD_PARTY_LICENSE_REGISTER.md $appFolder -Force
++
++$releaseDirectory = Join-Path $RepositoryRoot $OutputDirectory
++New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
++$zipPath = Join-Path $releaseDirectory 'PFA-Windows-x64.zip'
++if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
++Compress-Archive -Path (Join-Path $appFolder '*') -DestinationPath $zipPath -CompressionLevel Optimal
++$hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
++"$hash  PFA-Windows-x64.zip" | Set-Content (Join-Path $releaseDirectory 'SHA256SUMS.txt') -Encoding ASCII
++Write-Host "Release bundle created: $zipPath" -ForegroundColor Green
++Write-Host "SHA-256: $hash"
+diff --git a/scripts/smoke_test_app_reboot_004.py b/scripts/smoke_test_app_reboot_004.py
+new file mode 100644
+index 0000000..28d6156
+--- /dev/null
++++ b/scripts/smoke_test_app_reboot_004.py
+@@ -0,0 +1,101 @@
++"""Offscreen acceptance smoke for the resizable SLD workbench and QET placements."""
++
++from __future__ import annotations
++
++import os
++import tempfile
++from pathlib import Path
++
++os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
++
++from PySide6.QtWidgets import QApplication
++
++from power_fault_analyzer.bootstrap.workbench_container import build_workbench_services
++from power_fault_analyzer.interfaces.desktop.workbench.workbench_window import WorkbenchWindow
++
++
++def main() -> int:
++    application = QApplication.instance() or QApplication([])
++    services = build_workbench_services()
++    window = WorkbenchWindow(services)
++    window.resize(1600, 1000)
++    window.show()
++    application.processEvents()
++
++    assert window.main_splitter.count() == 3, "Main workspace must expose three resizable columns."
++    assert window.right_splitter.count() == 3, "Right workspace must expose three resizable panels."
++    window.main_splitter.setSizes([270, 830, 460])
++    window.right_splitter.setSizes([220, 190, 430])
++    application.processEvents()
++    assert all(size > 0 for size in window.main_splitter.sizes())
++    assert all(size > 0 for size in window.right_splitter.sizes())
++    assert window.main_splitter.handleWidth() >= 14
++    assert window.right_splitter.handleWidth() >= 14
++    assert window.main_splitter.handle(1).toolTip()
++    assert window.right_splitter.handle(1).toolTip()
++    assert window.main_splitter.handle(1).isVisible()
++    assert window.right_splitter.handle(1).isVisible()
++    window._set_editing_enabled(False)
++    assert not window.palette_panel.isEnabled()
++    window._set_editing_enabled(True)
++    assert window.palette_panel.isEnabled()
++
++    catalog = window.symbol_browser.catalog
++    assert catalog is not None, "Pinned QET source symbol catalog did not load."
++    assert len(catalog.symbols) == 18, (
++        f"Expected 18 pinned source symbols, got {len(catalog.symbols)}."
++    )
++    window.symbol_browser._rotate_preview(90.0)
++    assert window.symbol_browser._preview_item is not None
++    assert window.symbol_browser._preview_item.rotation() == 90.0
++    window.symbol_browser._request_insert()
++    selected = window.canvas.selected_diagram_symbol()
++    assert selected is not None, "Newly inserted drawing symbol must be selected."
++    instance_id, initial_rotation = selected
++    assert initial_rotation == 90.0, "Placed symbol must inherit the preview orientation."
++    assert instance_id in window.workspace.diagram_symbols
++    assert len(window.canvas.source_candidate_items()) == 1
++    window.canvas.set_source_candidate_visibility(False)
++    assert not window.canvas.source_candidate_items()[0].isVisible()
++    window.canvas.set_source_candidate_visibility(True)
++    assert window.canvas.source_candidate_items()[0].isVisible()
++    assert not window.workspace.network.equipment, (
++        "Drawing placement must not mutate the electrical model."
++    )
++
++    window._rotate_selected_symbol(90.0)
++    placement = window.workspace.diagram_symbols[instance_id]
++    assert placement.rotation_deg == 180.0, (
++        "Clockwise rotation was not persisted in workspace state."
++    )
++    window._undo_stack.undo()
++    assert window.workspace.diagram_symbols[instance_id].rotation_deg == 90.0
++    window._undo_stack.redo()
++    assert window.workspace.diagram_symbols[instance_id].rotation_deg == 180.0
++
++    window._remove_selected()
++    assert instance_id not in window.workspace.diagram_symbols
++    window._undo_stack.undo()
++    assert instance_id in window.workspace.diagram_symbols
++
++    with tempfile.TemporaryDirectory(prefix="pfa-app-reboot-004-") as temporary:
++        path = services.network_document_repository.save(
++            window.workspace, Path(temporary) / "rotation-roundtrip.pfan"
++        )
++        loaded = services.network_document_repository.load(path)
++        assert loaded.diagram_symbols[instance_id].rotation_deg == 180.0
++        assert loaded.network.id == window.workspace.network.id
++
++    window._dirty = False
++    window.close()
++    application.processEvents()
++    print(
++        "APP-REBOOT-004 PASS: resizable splitter layout, 18 source symbols, "
++        "rotatable preview and drawing placement, snap-to-grid, undo/redo, "
++        "remove/restore and JSON persistence."
++    )
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/scripts/verify_app_reboot_004.ps1 b/scripts/verify_app_reboot_004.ps1
+new file mode 100644
+index 0000000..3c27a87
+--- /dev/null
++++ b/scripts/verify_app_reboot_004.ps1
+@@ -0,0 +1,23 @@
++[CmdletBinding()]
++param()
++
++$ErrorActionPreference = 'Stop'
++$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
++Set-Location $RepositoryRoot
++
++function Invoke-Checked {
++    param([string]$Name, [scriptblock]$Command)
++    Write-Host "== $Name ==" -ForegroundColor Cyan
++    & $Command
++    if ($LASTEXITCODE -ne 0) {
++        throw "$Name failed with exit code $LASTEXITCODE."
++    }
++}
++
++Invoke-Checked 'Complete Ruff, compilation, test and QET verification' {
++    & (Join-Path $PSScriptRoot 'verify_qet_symbol_importer.ps1')
++}
++Invoke-Checked 'APP-REBOOT-004 resizable workspace and drawing-symbol acceptance' {
++    python scripts/smoke_test_app_reboot_004.py
++}
++Write-Host 'APP-REBOOT-004 verification completed successfully.' -ForegroundColor Green
+diff --git a/src/power_fault_analyzer/application/use_cases/network_workspace.py b/src/power_fault_analyzer/application/use_cases/network_workspace.py
+index 94d5bd7..79ee66c 100644
+--- a/src/power_fault_analyzer/application/use_cases/network_workspace.py
++++ b/src/power_fault_analyzer/application/use_cases/network_workspace.py
+@@ -2,8 +2,9 @@
+ 
+ from __future__ import annotations
+ 
+-from dataclasses import dataclass, field
++from dataclasses import dataclass, field, replace
+ from datetime import UTC, datetime
++from math import isfinite
+ from uuid import UUID, uuid4
+ 
+ from power_fault_analyzer.domain.aggregates.network import Network
+@@ -63,6 +64,40 @@ class NetworkStudyRecord:
+         )
+ 
+ 
++@dataclass(frozen=True, slots=True)
++class DiagramSymbolPlacement:
++    """A source-pinned drawing symbol placed on a sheet, not an electrical asset.
++
++    The placement deliberately stores only presentation data and a stable source
++    asset identifier. It never creates terminals, connections or solver objects.
++    """
++
++    instance_id: UUID
++    asset_id: str
++    x: float
++    y: float
++    rotation_deg: float = 0.0
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.instance_id, UUID):
++            raise TypeError("instance_id must be a UUID.")
++        if not isinstance(self.asset_id, str) or not self.asset_id.strip():
++            raise ValueError("asset_id must be a non-empty source asset identifier.")
++        object.__setattr__(self, "asset_id", self.asset_id.strip())
++        coordinates = (float(self.x), float(self.y), float(self.rotation_deg))
++        if not all(isfinite(value) and abs(value) < 1e9 for value in coordinates):
++            raise ValueError("Diagram symbol coordinates and rotation must be finite and bounded.")
++        object.__setattr__(self, "x", coordinates[0])
++        object.__setattr__(self, "y", coordinates[1])
++        object.__setattr__(self, "rotation_deg", coordinates[2] % 360.0)
++
++    @classmethod
++    def create(
++        cls, asset_id: str, x: float, y: float, rotation_deg: float = 0.0
++    ) -> DiagramSymbolPlacement:
++        return cls(uuid4(), asset_id, x, y, rotation_deg)
++
++
+ @dataclass(slots=True)
+ class NetworkWorkspace:
+     """A physical network plus a separate map of diagram positions.
+@@ -76,6 +111,7 @@ class NetworkWorkspace:
+     grid_spacing: float = 20.0
+     snap_enabled: bool = True
+     study_history: tuple[NetworkStudyRecord, ...] = ()
++    diagram_symbols: dict[UUID, DiagramSymbolPlacement] = field(default_factory=dict)
+ 
+     def __post_init__(self) -> None:
+         if not isinstance(self.network, Network):
+@@ -100,6 +136,18 @@ class NetworkWorkspace:
+                 raise ValueError("Diagram coordinates must be finite and bounded.")
+             normalized[identifier] = (x, y)
+         self.diagram_positions = normalized
++        if not isinstance(self.diagram_symbols, dict):
++            raise TypeError("diagram_symbols must be a dictionary keyed by placement UUID.")
++        normalized_symbols: dict[UUID, DiagramSymbolPlacement] = {}
++        for identifier, placement in self.diagram_symbols.items():
++            if not isinstance(identifier, UUID):
++                raise TypeError("Diagram symbol placement keys must be UUID values.")
++            if not isinstance(placement, DiagramSymbolPlacement):
++                raise TypeError("Every diagram symbol must be a DiagramSymbolPlacement.")
++            if identifier != placement.instance_id:
++                raise ValueError("Diagram symbol dictionary key must match placement.instance_id.")
++            normalized_symbols[identifier] = placement
++        self.diagram_symbols = normalized_symbols
+         self.grid_spacing = float(self.grid_spacing)
+         if not 2.0 <= self.grid_spacing <= 200.0:
+             raise ValueError("grid_spacing must be between 2 and 200 scene units.")
+@@ -115,6 +163,38 @@ class NetworkWorkspace:
+         if len(identifiers) != len(set(identifiers)):
+             raise ValueError("Network study run identifiers must be unique.")
+ 
++    def add_diagram_symbol(self, placement: DiagramSymbolPlacement) -> None:
++        if not isinstance(placement, DiagramSymbolPlacement):
++            raise TypeError("placement must be a DiagramSymbolPlacement.")
++        if placement.instance_id in self.diagram_symbols:
++            raise ValueError(f"Diagram symbol '{placement.instance_id}' already exists.")
++        self.diagram_symbols[placement.instance_id] = placement
++
++    def remove_diagram_symbol(self, instance_id: UUID) -> DiagramSymbolPlacement:
++        if not isinstance(instance_id, UUID):
++            raise TypeError("instance_id must be a UUID.")
++        try:
++            return self.diagram_symbols.pop(instance_id)
++        except KeyError as exc:
++            raise KeyError(f"Unknown diagram symbol placement '{instance_id}'.") from exc
++
++    def update_diagram_symbol(
++        self, instance_id: UUID, *, x: float | None = None, y: float | None = None,
++        rotation_deg: float | None = None,
++    ) -> DiagramSymbolPlacement:
++        try:
++            current = self.diagram_symbols[instance_id]
++        except KeyError as exc:
++            raise KeyError(f"Unknown diagram symbol placement '{instance_id}'.") from exc
++        updated = replace(
++            current,
++            x=current.x if x is None else x,
++            y=current.y if y is None else y,
++            rotation_deg=current.rotation_deg if rotation_deg is None else rotation_deg,
++        )
++        self.diagram_symbols[instance_id] = updated
++        return updated
++
+     def record_study(self, record: NetworkStudyRecord) -> None:
+         if not isinstance(record, NetworkStudyRecord):
+             raise TypeError("record must be a NetworkStudyRecord.")
+diff --git a/src/power_fault_analyzer/infrastructure/persistence/json_network_document_repository.py b/src/power_fault_analyzer/infrastructure/persistence/json_network_document_repository.py
+index ec46c26..48f3744 100644
+--- a/src/power_fault_analyzer/infrastructure/persistence/json_network_document_repository.py
++++ b/src/power_fault_analyzer/infrastructure/persistence/json_network_document_repository.py
+@@ -14,6 +14,7 @@ from power_fault_analyzer.application.ports.network_document_repository import (
+     NetworkDocumentRepositoryPort,
+ )
+ from power_fault_analyzer.application.use_cases.network_workspace import (
++    DiagramSymbolPlacement,
+     NetworkStudyRecord,
+     NetworkWorkspace,
+ )
+@@ -87,13 +88,25 @@ class JSONNetworkDocumentRepository(NetworkDocumentRepositoryPort):
+                 network.add_equipment(_equipment_from_dict(item))
+             for item in model.get("connections", []):
+                 network.connect(UUID(item["terminal_id"]), UUID(item["bus_id"]))
++            diagram_payload = payload.get("diagram", {})
+             positions = {
+                 UUID(key): (float(value[0]), float(value[1]))
+-                for key, value in payload.get("diagram", {}).get("positions", {}).items()
++                for key, value in diagram_payload.get("positions", {}).items()
+             }
++            symbols = {}
++            for item in diagram_payload.get("symbols", []):
++                placement = DiagramSymbolPlacement(
++                    instance_id=UUID(item["instance_id"]),
++                    asset_id=item["asset_id"],
++                    x=float(item["x"]),
++                    y=float(item["y"]),
++                    rotation_deg=float(item.get("rotation_deg", 0.0)),
++                )
++                symbols[placement.instance_id] = placement
+             return NetworkWorkspace(
+                 network=network,
+                 diagram_positions=positions,
++                diagram_symbols=symbols,
+                 grid_spacing=float(payload.get("diagram", {}).get("grid_spacing", 20.0)),
+                 snap_enabled=bool(payload.get("diagram", {}).get("snap_enabled", True)),
+                 study_history=tuple(_study_from_dict(item) for item in payload.get("study_history", [])),
+@@ -128,6 +141,16 @@ class JSONNetworkDocumentRepository(NetworkDocumentRepositoryPort):
+                     str(identifier): [float(position[0]), float(position[1])]
+                     for identifier, position in workspace.diagram_positions.items()
+                 },
++                "symbols": [
++                    {
++                        "instance_id": str(item.instance_id),
++                        "asset_id": item.asset_id,
++                        "x": item.x,
++                        "y": item.y,
++                        "rotation_deg": item.rotation_deg,
++                    }
++                    for item in workspace.diagram_symbols.values()
++                ],
+                 "grid_spacing": workspace.grid_spacing,
+                 "snap_enabled": workspace.snap_enabled,
+             },
+diff --git a/src/power_fault_analyzer/interfaces/desktop/workbench/network_canvas.py b/src/power_fault_analyzer/interfaces/desktop/workbench/network_canvas.py
+index 035446a..da0e32f 100644
+--- a/src/power_fault_analyzer/interfaces/desktop/workbench/network_canvas.py
++++ b/src/power_fault_analyzer/interfaces/desktop/workbench/network_canvas.py
+@@ -14,12 +14,18 @@ from PySide6.QtWidgets import (
+     QGraphicsScene,
+     QGraphicsSimpleTextItem,
+     QGraphicsView,
++    QMenu,
+ )
+ 
+-from power_fault_analyzer.application.use_cases.network_workspace import NetworkWorkspace
++from power_fault_analyzer.application.use_cases.network_workspace import (
++    DiagramSymbolPlacement,
++    NetworkWorkspace,
++)
+ from power_fault_analyzer.equipment.sources.equivalent_source import EquivalentSource
+ from power_fault_analyzer.equipment.sources.synchronous_generator import SynchronousGenerator
+ from power_fault_analyzer.equipment.transmission.line import Line
++from power_fault_analyzer.infrastructure.symbols.qet_elmt import SymbolDefinition
++from power_fault_analyzer.interfaces.desktop.workbench.qet_symbol_item import QETSymbolItem
+ 
+ 
+ ROLE_ELEMENT = 0
+@@ -172,6 +178,8 @@ class NetworkCanvasView(QGraphicsView):
+     element_selected = Signal(str, str)
+     layout_changed = Signal(str, float, float)
+     position_committed = Signal(str, float, float, float, float)
++    rotate_symbol_requested = Signal(str, float)
++    remove_symbol_requested = Signal()
+ 
+     def __init__(self, parent=None) -> None:
+         self._scene = QGraphicsScene()
+@@ -181,6 +189,9 @@ class NetworkCanvasView(QGraphicsView):
+         self._source_items: dict[str, SourceSymbol] = {}
+         self._branch_items: dict[str, BranchSymbol] = {}
+         self._source_links: dict[str, QGraphicsPathItem] = {}
++        self._draft_symbol_items: dict[str, QETSymbolItem] = {}
++        self._symbol_definitions: dict[str, SymbolDefinition] = {}
++        self._source_candidates_visible = True
+         self._grid_visible = True
+         self._snap_enabled = True
+         self._middle_pan = False
+@@ -207,6 +218,7 @@ class NetworkCanvasView(QGraphicsView):
+         self._source_items.clear()
+         self._branch_items.clear()
+         self._source_links.clear()
++        self._draft_symbol_items.clear()
+         if self._workspace is None:
+             return
+         network = self._workspace.network
+@@ -267,10 +279,83 @@ class NetworkCanvasView(QGraphicsView):
+             item.move_committed.connect(self.position_committed.emit)
+             self._scene.addItem(item)
+             self._bus_items[str(bus.id)] = item
++        for placement in self._workspace.diagram_symbols.values():
++            definition = self._symbol_definitions.get(placement.asset_id)
++            if definition is None:
++                # Do not substitute a guessed graphic when a pinned source asset is missing.
++                continue
++            self._add_draft_symbol_item(placement, definition)
+         self._update_branch_geometry()
+         self._scene.setSceneRect(self._scene.itemsBoundingRect().adjusted(-180, -160, 180, 160))
+         self.viewport().update()
+ 
++    def set_symbol_definitions(self, definitions: dict[str, SymbolDefinition]) -> None:
++        self._symbol_definitions = dict(definitions)
++        if self._workspace is not None:
++            self.render_network()
++
++    def insert_diagram_symbol(
++        self, placement: DiagramSymbolPlacement, definition: SymbolDefinition
++    ) -> None:
++        if placement.asset_id != definition.provenance.asset_id:
++            raise ValueError("Placement asset_id does not match the source symbol definition.")
++        self._symbol_definitions[placement.asset_id] = definition
++        self._add_draft_symbol_item(placement, definition)
++        self._scene.setSceneRect(self._scene.itemsBoundingRect().adjusted(-180, -160, 180, 160))
++
++    def _add_draft_symbol_item(
++        self, placement: DiagramSymbolPlacement, definition: SymbolDefinition
++    ) -> QETSymbolItem:
++        item = QETSymbolItem(
++            definition,
++            interactive=True,
++            instance_id=placement.instance_id,
++            rotation_deg=placement.rotation_deg,
++            snap_enabled=False,
++            grid_spacing=self._workspace.grid_spacing if self._workspace is not None else 20.0,
++        )
++        item.setPos(QPointF(placement.x, placement.y))
++        item.snap_enabled = self._snap_enabled
++        item.position_committed.connect(self.position_committed.emit)
++        item.setZValue(30)
++        item.setVisible(self._source_candidates_visible)
++        self._scene.addItem(item)
++        self._draft_symbol_items[str(placement.instance_id)] = item
++        self._scene.clearSelection()
++        item.setSelected(True)
++        return item
++
++    def source_candidate_items(self) -> tuple[QETSymbolItem, ...]:
++        """Return source-library placements, never electrical equipment items."""
++        return tuple(self._draft_symbol_items.values())
++
++    def set_source_candidate_visibility(self, visible: bool) -> None:
++        self._source_candidates_visible = bool(visible)
++        for item in self._draft_symbol_items.values():
++            item.setVisible(self._source_candidates_visible)
++
++    def remove_diagram_symbol(self, instance_id: UUID) -> None:
++        item = self._draft_symbol_items.pop(str(instance_id), None)
++        if item is not None:
++            self._scene.removeItem(item)
++            self._scene.setSceneRect(self._scene.itemsBoundingRect().adjusted(-180, -160, 180, 160))
++
++    def selected_diagram_symbol(self) -> tuple[UUID, float] | None:
++        for item in self._scene.selectedItems():
++            if isinstance(item, QETSymbolItem) and item.instance_id is not None:
++                return item.instance_id, item.rotation() % 360.0
++        return None
++
++    def set_diagram_symbol_rotation(self, instance_id: UUID, rotation_deg: float) -> None:
++        item = self._draft_symbol_items.get(str(instance_id))
++        if item is None:
++            raise KeyError(f"Diagram symbol instance '{instance_id}' is not rendered.")
++        item.setRotation(float(rotation_deg) % 360.0)
++        if self._workspace is not None:
++            self._workspace.update_diagram_symbol(instance_id, rotation_deg=rotation_deg)
++        self._scene.setSceneRect(self._scene.itemsBoundingRect().adjusted(-180, -160, 180, 160))
++        self.viewport().update()
++
+     def _update_branch_geometry(self) -> None:
+         for equipment in self._workspace.network.equipment:
+             if not isinstance(equipment, Line):
+@@ -352,18 +437,28 @@ class NetworkCanvasView(QGraphicsView):
+         self._snap_enabled = bool(enabled)
+         for item in self._bus_items.values():
+             item.snap = self._snap_enabled
++        for item in self._draft_symbol_items.values():
++            item.snap_enabled = self._snap_enabled
+         if self._workspace is not None:
+             self._workspace.snap_enabled = self._snap_enabled
+ 
+     def apply_position(self, identifier: str, x: float, y: float) -> None:
+-        item = self._bus_items.get(identifier) or self._source_items.get(identifier)
++        item = (
++            self._bus_items.get(identifier)
++            or self._source_items.get(identifier)
++            or self._draft_symbol_items.get(identifier)
++        )
+         if item is None:
+             return
+         self._applying_position = True
+         try:
+             item.setPos(QPointF(x, y))
+             if self._workspace is not None:
+-                self._workspace.diagram_positions[UUID(identifier)] = (float(x), float(y))
++                key = UUID(identifier)
++                if key in self._workspace.diagram_symbols:
++                    self._workspace.update_diagram_symbol(key, x=x, y=y)
++                else:
++                    self._workspace.diagram_positions[key] = (float(x), float(y))
+             self._update_branch_geometry()
+         finally:
+             self._applying_position = False
+@@ -392,6 +487,26 @@ class NetworkCanvasView(QGraphicsView):
+         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
+         self.scale(factor, factor)
+ 
++    def contextMenuEvent(self, event) -> None:
++        item = self.itemAt(event.pos())
++        if isinstance(item, QETSymbolItem) and item.instance_id is not None:
++            item.setSelected(True)
++            menu = QMenu(self)
++            menu.addAction(
++                "Rotate 90° clockwise",
++                lambda: self.rotate_symbol_requested.emit(str(item.instance_id), 90.0),
++            )
++            menu.addAction(
++                "Rotate 90° counterclockwise",
++                lambda: self.rotate_symbol_requested.emit(str(item.instance_id), -90.0),
++            )
++            menu.addSeparator()
++            menu.addAction("Remove drawing symbol", self.remove_symbol_requested.emit)
++            menu.exec(event.globalPos())
++            event.accept()
++            return
++        super().contextMenuEvent(event)
++
+     def mousePressEvent(self, event) -> None:
+         if event.button() is Qt.MouseButton.MiddleButton:
+             self._middle_pan = True
+diff --git a/src/power_fault_analyzer/interfaces/desktop/workbench/qet_symbol_browser.py b/src/power_fault_analyzer/interfaces/desktop/workbench/qet_symbol_browser.py
+index c58ccc2..8f83a9b 100644
+--- a/src/power_fault_analyzer/interfaces/desktop/workbench/qet_symbol_browser.py
++++ b/src/power_fault_analyzer/interfaces/desktop/workbench/qet_symbol_browser.py
+@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
+     QListWidget,
+     QListWidgetItem,
+     QPushButton,
++    QSizePolicy,
+     QSplitter,
+     QVBoxLayout,
+     QWidget,
+@@ -34,6 +35,7 @@ class QETSymbolBrowser(QWidget):
+     """Browse and preview actual imported QET files; never invents substitutes."""
+ 
+     symbol_selected = Signal(str)
++    insert_requested = Signal(str, float)
+ 
+     def __init__(
+         self,
+@@ -49,21 +51,43 @@ class QETSymbolBrowser(QWidget):
+         self.catalog: QETSymbolCatalog | None = None
+         self._definitions_by_asset_id: dict[str, SymbolDefinition] = {}
+         self._preview_bounds = None
++        self._preview_item: QETSymbolItem | None = None
++        self._preview_rotation = 0.0
+ 
+         self.search = QLineEdit()
+         self.search.setPlaceholderText("Search symbol name or asset ID…")
+         self.search.textChanged.connect(self._filter_symbols)
+         self.asset_list = QListWidget()
++        self.asset_list.setMinimumWidth(110)
+         self.asset_list.currentItemChanged.connect(self._selection_changed)
+         self.preview_scene = QGraphicsScene(self)
+         self.preview_scene.setBackgroundBrush(QBrush(QColor("#FFFFFF")))
+         self.preview = QGraphicsView(self.preview_scene)
+-        self.preview.setMinimumSize(300, 240)
++        self.preview.setMinimumSize(0, 0)
++        self.preview.setSizePolicy(
++            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
++        )
+         self.preview.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+         self.details = QLabel("Acquire the pinned QElectroTech symbol seed to browse source assets.")
+         self.details.setWordWrap(True)
++        self.details.setMinimumHeight(64)
++        self.details.setMaximumHeight(170)
+         self.status = QLabel()
+         self.status.setWordWrap(True)
++        self.rotate_left_button = QPushButton("Rotate preview −90°")
++        self.rotate_right_button = QPushButton("Rotate preview +90°")
++        self.rotate_left_button.setEnabled(False)
++        self.rotate_right_button.setEnabled(False)
++        self.rotate_left_button.clicked.connect(lambda: self._rotate_preview(-90.0))
++        self.rotate_right_button.clicked.connect(lambda: self._rotate_preview(90.0))
++        self.insert_button = QPushButton("Place QET source glyph · drawing-only")
++        self.insert_button.setToolTip(
++            "Places this source vector as an unconnected drawing candidate. "
++            "It is not an approved single-line symbol or electrical equipment."
++        )
++        self.insert_button.setEnabled(False)
++        self.insert_button.clicked.connect(self._request_insert)
++        self.asset_list.itemDoubleClicked.connect(lambda _item: self._request_insert())
+         self.refresh_button = QPushButton("Refresh symbol library")
+         self.refresh_button.clicked.connect(self.refresh_library)
+ 
+@@ -76,22 +100,39 @@ class QETSymbolBrowser(QWidget):
+         right_layout = QVBoxLayout(right)
+         right_layout.setContentsMargins(0, 0, 0, 0)
+         right_layout.addWidget(self.preview, 1)
+-        right_layout.addWidget(self.details)
+         splitter = QSplitter(Qt.Orientation.Horizontal)
+         splitter.addWidget(left)
+         splitter.addWidget(right)
++        splitter.setHandleWidth(7)
++        splitter.setChildrenCollapsible(False)
+         splitter.setStretchFactor(0, 1)
+-        splitter.setStretchFactor(1, 2)
++        splitter.setStretchFactor(1, 3)
++        splitter.setSizes([150, 390])
+ 
+         layout = QVBoxLayout(self)
++        layout.setContentsMargins(6, 6, 6, 6)
++        layout.setSpacing(6)
+         layout.addWidget(splitter, 1)
+-        layout.addWidget(self.status)
+-        layout.addWidget(self.refresh_button)
++        layout.addWidget(self.details, 0)
++        layout.addWidget(self.status, 0)
++        rotation_controls = QWidget()
++        rotation_layout = QVBoxLayout(rotation_controls)
++        rotation_layout.setContentsMargins(0, 0, 0, 0)
++        rotation_layout.setSpacing(4)
++        rotation_layout.addWidget(self.rotate_left_button)
++        rotation_layout.addWidget(self.rotate_right_button)
++        layout.addWidget(rotation_controls, 0)
++        layout.addWidget(self.insert_button, 0)
++        layout.addWidget(self.refresh_button, 0)
+         self.refresh_library()
+ 
+     def refresh_library(self) -> None:
+         self.asset_list.clear()
+         self.preview_scene.clear()
++        self._preview_item = None
++        self._preview_rotation = 0.0
++        self.rotate_left_button.setEnabled(False)
++        self.rotate_right_button.setEnabled(False)
+         self._definitions_by_asset_id.clear()
+         try:
+             self.catalog = load_qet_symbol_catalog(self.manifest_path, self.asset_root)
+@@ -111,7 +152,8 @@ class QETSymbolBrowser(QWidget):
+             item.setData(Qt.ItemDataRole.UserRole, asset_id)
+             item.setToolTip(
+                 f"Source UUID: {symbol.source_uuid}\n"
+-                f"Normative status: {symbol.provenance.normative_status}\n"
++                f"Source-library status: candidate; not approved as a power-system single-line glyph\n"
++            f"Normative status: {symbol.provenance.normative_status}\n"
+                 f"Source: {symbol.provenance.source_path}"
+             )
+             self.asset_list.addItem(item)
+@@ -134,6 +176,11 @@ class QETSymbolBrowser(QWidget):
+         previous: QListWidgetItem | None,
+     ) -> None:
+         del previous
++        self.insert_button.setEnabled(False)
++        self.rotate_left_button.setEnabled(False)
++        self.rotate_right_button.setEnabled(False)
++        self._preview_item = None
++        self._preview_rotation = 0.0
+         if current is None:
+             return
+         asset_id = current.data(Qt.ItemDataRole.UserRole)
+@@ -142,6 +189,8 @@ class QETSymbolBrowser(QWidget):
+             return
+         self.preview_scene.clear()
+         self._preview_bounds = None
++        self._preview_item = None
++        self._preview_rotation = 0.0
+         try:
+             graphics_item = QETSymbolItem(symbol)
+         except UnsupportedQETPrimitiveError as exc:
+@@ -153,7 +202,11 @@ class QETSymbolBrowser(QWidget):
+             self.symbol_selected.emit(asset_id)
+             return
+ 
++        self._preview_item = graphics_item
+         self.preview_scene.addItem(graphics_item)
++        self.insert_button.setEnabled(True)
++        self.rotate_left_button.setEnabled(True)
++        self.rotate_right_button.setEnabled(True)
+         bounds = graphics_item.boundingRect().adjusted(-20.0, -20.0, 20.0, 20.0)
+         self.preview_scene.setSceneRect(bounds)
+         self._preview_bounds = bounds
+@@ -170,17 +223,47 @@ class QETSymbolBrowser(QWidget):
+             f"Source UUID: {symbol.source_uuid}\n"
+             f"Source author: {symbol.author or 'Not stated'}\n"
+             f"License: {symbol.provenance.license_identifier}\n"
++            f"Source-library status: candidate; not approved as a power-system single-line glyph\n"
+             f"Normative status: {symbol.provenance.normative_status}\n"
+             f"Git blob: {symbol.source_git_blob_sha1}\n"
+             f"Terminals:\n{terminal_summary}"
+         )
+         self.symbol_selected.emit(asset_id)
+ 
++    def _rotate_preview(self, delta_deg: float) -> None:
++        if self._preview_item is None:
++            return
++        self._preview_rotation = (self._preview_rotation + delta_deg) % 360.0
++        self._preview_item.setRotation(self._preview_rotation)
++        self._fit_preview()
++        self.status.setText(
++            f"Preview rotation: {self._preview_rotation:g}° · source geometry unchanged"
++        )
++
++    def selected_asset_id(self) -> str | None:
++        item = self.asset_list.currentItem()
++        return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
++
++    def definition_for_asset(self, asset_id: str) -> SymbolDefinition:
++        try:
++            return self._definitions_by_asset_id[asset_id]
++        except KeyError as exc:
++            raise KeyError(f"The selected source asset is not loaded: {asset_id}") from exc
++
++    def _request_insert(self) -> None:
++        asset_id = self.selected_asset_id()
++        if asset_id is not None and self.insert_button.isEnabled():
++            self.insert_requested.emit(asset_id, self._preview_rotation)
++
+     def _fit_preview(self) -> None:
+-        if self._preview_bounds is not None:
+-            self.preview.fitInView(
+-                self._preview_bounds, Qt.AspectRatioMode.KeepAspectRatio
+-            )
++        if self._preview_item is None:
++            return
++        bounds = self._preview_item.sceneBoundingRect().adjusted(
++            -20.0, -20.0, 20.0, 20.0
++        )
++        self._preview_bounds = bounds
++        self.preview_scene.setSceneRect(bounds)
++        self.preview.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+ 
+     def resizeEvent(self, event) -> None:
+         super().resizeEvent(event)
+diff --git a/src/power_fault_analyzer/interfaces/desktop/workbench/qet_symbol_item.py b/src/power_fault_analyzer/interfaces/desktop/workbench/qet_symbol_item.py
+index 9037659..ec613e3 100644
+--- a/src/power_fault_analyzer/interfaces/desktop/workbench/qet_symbol_item.py
++++ b/src/power_fault_analyzer/interfaces/desktop/workbench/qet_symbol_item.py
+@@ -6,7 +6,9 @@ network objects or infer terminal-to-domain mappings.
+ 
+ from __future__ import annotations
+ 
+-from PySide6.QtCore import QPointF, QRectF, Qt
++from uuid import UUID
++
++from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+ from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
+ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QStyleOptionGraphicsItem, QWidget
+ 
+@@ -29,6 +31,8 @@ class QETSymbolItem(QGraphicsObject):
+     Terminal positions use the same translation as the visible geometry.
+     """
+ 
++    position_committed = Signal(str, float, float, float, float)
++
+     _SUPPORTED = frozenset({"line", "ellipse", "rect", "rectangle", "arc", "polygon", "text"})
+ 
+     def __init__(
+@@ -38,6 +42,11 @@ class QETSymbolItem(QGraphicsObject):
+         display_name: str | None = None,
+         parent: QGraphicsObject | None = None,
+         require_connectable: bool = False,
++        interactive: bool = False,
++        instance_id: UUID | None = None,
++        rotation_deg: float = 0.0,
++        snap_enabled: bool = True,
++        grid_spacing: float = 20.0,
+     ) -> None:
+         super().__init__(parent)
+         if require_connectable:
+@@ -49,12 +58,31 @@ class QETSymbolItem(QGraphicsObject):
+             raise UnsupportedQETPrimitiveError(
+                 f"Cannot render {definition.display_name!r}; unsupported primitives: {', '.join(unsupported)}."
+             )
++        if interactive and not isinstance(instance_id, UUID):
++            raise TypeError("Interactive QET drawing items require a placement UUID.")
+         self.definition = definition
+         self.display_name = display_name or definition.display_name
++        self.instance_id = instance_id
++        self.asset_id = definition.provenance.asset_id
++        self._interactive = interactive
++        self.snap_enabled = bool(snap_enabled)
++        self.grid_spacing = float(grid_spacing)
++        if not 2.0 <= self.grid_spacing <= 200.0:
++            raise ValueError("grid_spacing must be between 2 and 200 scene units.")
++        self._drag_start = QPointF()
+         # QET primitive coordinates are relative to the declared hotspot.
+         # The declared width/height define the local element rectangle.
+         self._rect = QRectF(0.0, 0.0, definition.source_width, definition.source_height)
+-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
++        flags = QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
++        if interactive:
++            flags |= (
++                QGraphicsItem.GraphicsItemFlag.ItemIsMovable
++                | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
++            )
++            self.setData(0, ("diagram_symbol", str(instance_id)))
++        self.setFlags(flags)
++        self.setTransformOriginPoint(definition.hotspot.x, definition.hotspot.y)
++        self.setRotation(float(rotation_deg) % 360.0)
+         self.setToolTip(
+             f"{self.display_name}\n"
+             f"Source: {definition.provenance.repository}/{definition.provenance.source_path}\n"
+@@ -76,6 +104,40 @@ class QETSymbolItem(QGraphicsObject):
+         """Return the source hotspot in this item's local coordinate system."""
+         return QPointF(self.definition.hotspot.x, self.definition.hotspot.y)
+ 
++    def mousePressEvent(self, event) -> None:
++        self._drag_start = self.pos()
++        super().mousePressEvent(event)
++
++    def mouseReleaseEvent(self, event) -> None:
++        super().mouseReleaseEvent(event)
++        if not self._interactive or self.instance_id is None:
++            return
++        current = self.pos()
++        if (current - self._drag_start).manhattanLength() > 0.1:
++            self.position_committed.emit(
++                str(self.instance_id),
++                self._drag_start.x(),
++                self._drag_start.y(),
++                current.x(),
++                current.y(),
++            )
++
++
++    def itemChange(self, change, value):
++        if (
++            self._interactive
++            and self.snap_enabled
++            and change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
++        ):
++            spacing = self.grid_spacing
++            hotspot = self.transformOriginPoint()
++            anchor_x = value.x() + hotspot.x()
++            anchor_y = value.y() + hotspot.y()
++            snapped_x = round(anchor_x / spacing) * spacing
++            snapped_y = round(anchor_y / spacing) * spacing
++            return QPointF(snapped_x - hotspot.x(), snapped_y - hotspot.y())
++        return super().itemChange(change, value)
++
+     def paint(
+         self,
+         painter: QPainter,
+@@ -85,6 +147,11 @@ class QETSymbolItem(QGraphicsObject):
+         del option, widget
+         painter.save()
+         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
++        if self._interactive and self.isSelected():
++            selection_pen = QPen(QColor("#2563EB"), 1.2, Qt.PenStyle.DashLine)
++            painter.setPen(selection_pen)
++            painter.setBrush(Qt.BrushStyle.NoBrush)
++            painter.drawRect(self._rect.adjusted(-5.0, -5.0, 5.0, 5.0))
+         painter.translate(self.definition.hotspot.x, self.definition.hotspot.y)
+         for primitive in self.definition.visual_primitives:
+             self._paint_primitive(painter, primitive)
+diff --git a/src/power_fault_analyzer/interfaces/desktop/workbench/workbench_window.py b/src/power_fault_analyzer/interfaces/desktop/workbench/workbench_window.py
+index 327c716..4a07a46 100644
+--- a/src/power_fault_analyzer/interfaces/desktop/workbench/workbench_window.py
++++ b/src/power_fault_analyzer/interfaces/desktop/workbench/workbench_window.py
+@@ -2,22 +2,26 @@
+ 
+ from __future__ import annotations
+ 
++import sys
+ import traceback
+ from pathlib import Path
+ from uuid import UUID
+ 
+-from PySide6.QtCore import QObject, QRunnable, QRectF, Qt, QThreadPool, Signal
++from PySide6.QtCore import QObject, QRectF, QRunnable, QSettings, QThreadPool, QTimer, Qt, Signal
+ from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter, QUndoCommand, QUndoStack
+ from PySide6.QtSvg import QSvgGenerator
+ from PySide6.QtWidgets import (
+     QDockWidget,
+     QFileDialog,
++    QFrame,
+     QLabel,
+     QMainWindow,
+     QMessageBox,
+     QPlainTextEdit,
+     QProgressBar,
+     QPushButton,
++    QSplitter,
++    QSplitterHandle,
+     QTabWidget,
+     QToolBar,
+     QTreeWidget,
+@@ -27,6 +31,7 @@ from PySide6.QtWidgets import (
+ )
+ 
+ from power_fault_analyzer.application.use_cases.network_workspace import (
++    DiagramSymbolPlacement,
+     NetworkStudyRecord,
+     NetworkWorkspace,
+ )
+@@ -89,6 +94,84 @@ class _MoveDiagramItemCommand(QUndoCommand):
+         self._window._apply_diagram_position(self._identifier, *self._new)
+ 
+ 
++class _AddDiagramSymbolCommand(QUndoCommand):
++    def __init__(self, window, placement: DiagramSymbolPlacement, definition) -> None:
++        super().__init__("Insert source drawing symbol")
++        self._window = window
++        self._placement = placement
++        self._definition = definition
++
++    def undo(self) -> None:
++        self._window._remove_diagram_symbol(self._placement.instance_id)
++
++    def redo(self) -> None:
++        self._window._add_diagram_symbol(self._placement, self._definition)
++
++
++class _RotateDiagramSymbolCommand(QUndoCommand):
++    def __init__(self, window, identifier: UUID, old: float, new: float) -> None:
++        super().__init__("Rotate drawing symbol")
++        self._window = window
++        self._identifier = identifier
++        self._old = old
++        self._new = new
++
++    def undo(self) -> None:
++        self._window._apply_diagram_symbol_rotation(self._identifier, self._old)
++
++    def redo(self) -> None:
++        self._window._apply_diagram_symbol_rotation(self._identifier, self._new)
++
++
++class _RemoveDiagramSymbolCommand(QUndoCommand):
++    def __init__(self, window, placement: DiagramSymbolPlacement, definition) -> None:
++        super().__init__("Remove drawing symbol")
++        self._window = window
++        self._placement = placement
++        self._definition = definition
++
++    def undo(self) -> None:
++        self._window._add_diagram_symbol(self._placement, self._definition)
++
++    def redo(self) -> None:
++        self._window._remove_diagram_symbol(self._placement.instance_id)
++
++
++class _EngineeringSplitterHandle(QSplitterHandle):
++    """High-contrast splitter handle with a visible grip affordance."""
++
++    def paintEvent(self, event) -> None:
++        super().paintEvent(event)
++        painter = QPainter(self)
++        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
++        painter.setPen(Qt.PenStyle.NoPen)
++        painter.setBrush(QColor("#64748B"))
++        if self.orientation() == Qt.Orientation.Horizontal:
++            center_x = self.width() / 2.0
++            for offset in (-6.0, 0.0, 6.0):
++                painter.drawRoundedRect(
++                    QRectF(center_x - 2.0, self.height() / 2.0 + offset - 1.0, 4.0, 2.0),
++                    1.0,
++                    1.0,
++                )
++        else:
++            center_y = self.height() / 2.0
++            for offset in (-6.0, 0.0, 6.0):
++                painter.drawRoundedRect(
++                    QRectF(self.width() / 2.0 + offset - 1.0, center_y - 2.0, 2.0, 4.0),
++                    1.0,
++                    1.0,
++                )
++        painter.end()
++
++
++class _EngineeringSplitter(QSplitter):
++    """Splitter with obvious handles, intended for the resizable workbench."""
++
++    def createHandle(self) -> QSplitterHandle:
++        return _EngineeringSplitterHandle(self.orientation(), self)
++
++
+ class WorkbenchWindow(QMainWindow):
+     """Main window composed from real network use cases and the production solver."""
+ 
+@@ -104,14 +187,16 @@ class WorkbenchWindow(QMainWindow):
+         self._thread_pool = QThreadPool.globalInstance()
+         self._undo_stack = QUndoStack(self)
+         self._dark_theme = False
++        self._ui_settings = QSettings("POWER_FAULT_ANALYZER", "EngineeringWorkbench")
+         self._build_actions()
+         self._build_docks()
+         self._build_central_workspace()
+         self._build_toolbars()
+         self._connect_canvas()
+         self._refresh_all()
+-        self.resize(1560, 980)
+-        self.setMinimumSize(1120, 760)
++        self.resize(1600, 1000)
++        self.setMinimumSize(1050, 700)
++        QTimer.singleShot(0, self._restore_workspace_layout)
+         self.setStyleSheet(_LIGHT_WORKBENCH_STYLESHEET)
+         self.setWindowTitle("POWER_FAULT_ANALYZER — Engineering Workbench")
+         self.statusBar().showMessage("Ready · Physical network model · 60 Hz")
+@@ -146,6 +231,25 @@ class WorkbenchWindow(QMainWindow):
+             self._undo_stack.createRedoAction(self, "Redo Diagram Change")
+         )
+ 
++        diagram_menu = bar.addMenu("&Diagram")
++        self.rotate_clockwise_action = self._action(
++            "Rotate Selected QET Drawing Candidate 90° Clockwise",
++            lambda: self._rotate_selected_symbol(90.0),
++            "Ctrl+R",
++        )
++        self.rotate_counterclockwise_action = self._action(
++            "Rotate Selected QET Drawing Candidate 90° Counterclockwise",
++            lambda: self._rotate_selected_symbol(-90.0),
++            "Ctrl+Shift+R",
++        )
++        self.remove_selected_action = self._action(
++            "Remove Selected Element", self._remove_selected, "Delete"
++        )
++        diagram_menu.addAction(self.rotate_clockwise_action)
++        diagram_menu.addAction(self.rotate_counterclockwise_action)
++        diagram_menu.addSeparator()
++        diagram_menu.addAction(self.remove_selected_action)
++
+         project_menu = bar.addMenu("&Project")
+         project_menu.addAction(self._action("Load REF-3PH-001B Template", self._load_reference_template))
+         project_menu.addAction(self._action("Validate Network", self._validate_network))
+@@ -158,7 +262,6 @@ class WorkbenchWindow(QMainWindow):
+         model_menu.addAction(
+             self._action("Connect Selected Buses with Line…", self._add_line_from_selection)
+         )
+-        model_menu.addAction(self._action("Remove Selected Element", self._remove_selected, "Delete"))
+ 
+         network_menu = bar.addMenu("&Network")
+         network_menu.addAction(self._action("Fit Diagram", self._fit_diagram, "Ctrl+0"))
+@@ -171,6 +274,15 @@ class WorkbenchWindow(QMainWindow):
+ 
+         self.view_menu = bar.addMenu("&View")
+         self.view_menu.addAction(self._action("Toggle Dark Theme", self._toggle_theme))
++        self.show_source_candidates_action = QAction(
++            "Show QET drawing-only candidates", self
++        )
++        self.show_source_candidates_action.setCheckable(True)
++        self.show_source_candidates_action.setChecked(True)
++        self.show_source_candidates_action.toggled.connect(
++            self._set_source_candidate_visibility
++        )
++        self.view_menu.addAction(self.show_source_candidates_action)
+ 
+         tools_menu = bar.addMenu("&Tools")
+         tools_menu.addAction(self._action("Validate Network", self._validate_network))
+@@ -210,6 +322,14 @@ class WorkbenchWindow(QMainWindow):
+             model.addAction(self._action(label, slot))
+         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, model)
+ 
++        self.diagram_toolbar = QToolBar("Diagram Editing", self)
++        self.diagram_toolbar.setObjectName("DiagramEditingToolbar")
++        self.diagram_toolbar.setMovable(False)
++        self.diagram_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
++        self.diagram_toolbar.addAction(self.rotate_clockwise_action)
++        self.diagram_toolbar.addAction(self.rotate_counterclockwise_action)
++        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.diagram_toolbar)
++
+         analysis = QToolBar("Analysis", self)
+         self.analysis_toolbar = analysis
+         analysis.setObjectName("AnalysisToolbar")
+@@ -219,17 +339,33 @@ class WorkbenchWindow(QMainWindow):
+         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, analysis)
+ 
+     # ------------------------------------------------------------- main layout
++    def _panel(self, title: str, content: QWidget) -> QFrame:
++        panel = QFrame()
++        panel_key = "".join(character if character.isalnum() else "_" for character in title)
++        panel.setObjectName(f"WorkbenchPanel_{panel_key.strip('_')}")
++        panel.setProperty("workbenchPanel", True)
++        layout = QVBoxLayout(panel)
++        layout.setContentsMargins(8, 7, 8, 8)
++        layout.setSpacing(6)
++        heading = QLabel(title.upper())
++        heading.setObjectName("WorkbenchPanelHeading")
++        layout.addWidget(heading, 0)
++        layout.addWidget(content, 1)
++        panel.setMinimumWidth(0)
++        panel.setMinimumHeight(0)
++        return panel
++
+     def _build_docks(self) -> None:
+         self.explorer = QTreeWidget()
++        self.explorer.setHeaderHidden(True)
+         self.explorer.setHeaderLabels(["Project Explorer"])
+         self.explorer.itemSelectionChanged.connect(self._on_explorer_selection)
+-        self.explorer_dock = self._dock("Project Explorer", self.explorer, Qt.DockWidgetArea.LeftDockWidgetArea)
++        self.explorer_panel = self._panel("Project Explorer", self.explorer)
+ 
+         palette = QWidget()
+         palette_layout = QVBoxLayout(palette)
+-        palette_layout.setContentsMargins(10, 10, 10, 10)
++        palette_layout.setContentsMargins(0, 0, 0, 0)
+         palette_layout.setSpacing(7)
+-        palette_layout.addWidget(QLabel("EQUIPMENT PALETTE"))
+         for label, slot in (
+             ("AC Bus", self._add_bus),
+             ("Thevenin Equivalent Source", self._add_equivalent_source),
+@@ -240,26 +376,27 @@ class WorkbenchWindow(QMainWindow):
+             button.setMinimumHeight(34)
+             button.clicked.connect(slot)
+             palette_layout.addWidget(button)
+-        palette_layout.addSpacing(8)
+         template_button = QPushButton("Load REF-3PH-001B Template")
+-        template_button.setMinimumHeight(38)
++        template_button.setMinimumHeight(36)
+         template_button.clicked.connect(self._load_reference_template)
+         palette_layout.addWidget(template_button)
+         palette_layout.addStretch(1)
+-        self.palette_dock = self._dock("Equipment Palette", palette, Qt.DockWidgetArea.RightDockWidgetArea)
++        self.palette_panel = self._panel("Equipment Palette", palette)
+ 
+         self.properties = QTreeWidget()
+         self.properties.setHeaderLabels(["Property", "Value"])
+         self.properties.setColumnWidth(0, 155)
+-        self.properties_dock = self._dock(
+-            "Properties Inspector", self.properties, Qt.DockWidgetArea.RightDockWidgetArea
+-        )
++        self.properties_panel = self._panel("Properties Inspector", self.properties)
+ 
+-        repository_root = Path(__file__).resolve().parents[5]
+-        self.symbol_browser = QETSymbolBrowser(repository_root)
++        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
++            resource_root = Path(sys._MEIPASS)
++        else:
++            resource_root = Path(__file__).resolve().parents[5]
++        self.symbol_browser = QETSymbolBrowser(resource_root)
+         self.symbol_browser.symbol_selected.connect(self._on_qet_symbol_selected)
+-        self.symbol_browser_dock = self._dock(
+-            "IEC Symbol Library", self.symbol_browser, Qt.DockWidgetArea.RightDockWidgetArea
++        self.symbol_browser.insert_requested.connect(self._insert_qet_symbol)
++        self.symbol_browser_panel = self._panel(
++            "QET Source Library · candidates only", self.symbol_browser
+         )
+ 
+         self.console = QPlainTextEdit()
+@@ -268,6 +405,7 @@ class WorkbenchWindow(QMainWindow):
+         self.console_dock = self._dock(
+             "Calculation Console", self.console, Qt.DockWidgetArea.BottomDockWidgetArea
+         )
++        self.console_dock.hide()
+         self._progress = QProgressBar(self)
+         self._progress.setRange(0, 0)
+         self._progress.setTextVisible(False)
+@@ -275,30 +413,28 @@ class WorkbenchWindow(QMainWindow):
+         self._progress.hide()
+         self.statusBar().addPermanentWidget(self._progress)
+ 
+-        for dock in (
+-            self.explorer_dock,
+-            self.palette_dock,
+-            self.properties_dock,
+-            self.symbol_browser_dock,
+-            self.console_dock,
++        self._panel_actions = {}
++        for title, panel in (
++            ("Project Explorer", self.explorer_panel),
++            ("Equipment Palette", self.palette_panel),
++            ("Properties Inspector", self.properties_panel),
++            ("QET Source Library · candidates only", self.symbol_browser_panel),
+         ):
+-            self.view_menu.addAction(dock.toggleViewAction())
+-        # Diagnostics remain available from View but do not consume drawing
+-        # area during normal engineering work.
+-        self.console_dock.hide()
+-
+-    def _on_qet_symbol_selected(self, asset_id: str) -> None:
+-        self.statusBar().showMessage(
+-            f"QET source symbol preview: {asset_id}. Insertion remains disabled until an explicit "
+-            "domain-equipment and terminal mapping is supplied.",
+-            9000,
+-        )
++            action = QAction(title, self)
++            action.setCheckable(True)
++            action.setChecked(True)
++            action.toggled.connect(panel.setVisible)
++            self._panel_actions[panel] = action
++            self.view_menu.addAction(action)
++        self.view_menu.addAction(self.console_dock.toggleViewAction())
++        self.view_menu.addSeparator()
++        self.view_menu.addAction(self._action("Reset Workspace Layout", self._reset_workspace_layout))
+ 
+     def _dock(self, title: str, widget: QWidget, area: Qt.DockWidgetArea) -> QDockWidget:
+         dock = QDockWidget(title, self)
+         dock.setObjectName(title.replace(" ", "") + "Dock")
+         dock.setWidget(widget)
+-        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
++        dock.setAllowedAreas(area)
+         dock.setFeatures(
+             QDockWidget.DockWidgetFeature.DockWidgetMovable
+             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+@@ -310,15 +446,212 @@ class WorkbenchWindow(QMainWindow):
+     def _build_central_workspace(self) -> None:
+         self.workspace_tabs = QTabWidget()
+         self.canvas = NetworkCanvasView()
++        if self.symbol_browser.catalog is not None:
++            self.canvas.set_symbol_definitions({
++                item.provenance.asset_id: item
++                for item in self.symbol_browser.catalog.symbols
++                if item.provenance.asset_id is not None
++            })
+         self.results = ResultsWorkspace()
+         self.workspace_tabs.addTab(self.canvas, "Network Design")
+         self.workspace_tabs.addTab(self.results, "Results Workspace")
+-        self.setCentralWidget(self.workspace_tabs)
++        self.workspace_tabs.setMinimumWidth(460)
++
++        self.right_splitter = _EngineeringSplitter(Qt.Orientation.Vertical)
++        self.right_splitter.setObjectName("RightEngineeringPanelsSplitter")
++        self.right_splitter.setHandleWidth(14)
++        self.right_splitter.setChildrenCollapsible(False)
++        self.right_splitter.addWidget(self.palette_panel)
++        self.right_splitter.addWidget(self.properties_panel)
++        self.right_splitter.addWidget(self.symbol_browser_panel)
++        self.right_splitter.setStretchFactor(0, 1)
++        self.right_splitter.setStretchFactor(1, 1)
++        self.right_splitter.setStretchFactor(2, 3)
++        self.right_splitter.setMinimumWidth(340)
++
++        self.main_splitter = _EngineeringSplitter(Qt.Orientation.Horizontal)
++        self.main_splitter.setObjectName("MainWorkspaceSplitter")
++        self.main_splitter.setHandleWidth(14)
++        self.main_splitter.setChildrenCollapsible(False)
++        self.main_splitter.addWidget(self.explorer_panel)
++        self.main_splitter.addWidget(self.workspace_tabs)
++        self.main_splitter.addWidget(self.right_splitter)
++        self.main_splitter.setStretchFactor(0, 0)
++        self.main_splitter.setStretchFactor(1, 1)
++        self.main_splitter.setStretchFactor(2, 0)
++        self.explorer_panel.setMinimumWidth(175)
++        self.palette_panel.setMinimumHeight(110)
++        self.properties_panel.setMinimumHeight(110)
++        self.symbol_browser_panel.setMinimumHeight(210)
++        for splitter, cursor in (
++            (self.main_splitter, Qt.CursorShape.SplitHCursor),
++            (self.right_splitter, Qt.CursorShape.SplitVCursor),
++        ):
++            splitter.setOpaqueResize(True)
++            for index in range(splitter.count()):
++                splitter.setCollapsible(index, False)
++            for index in range(1, splitter.count()):
++                handle = splitter.handle(index)
++                handle.setCursor(cursor)
++                handle.setToolTip("Drag to resize engineering workspace panels")
++        self.main_splitter.setSizes([250, 850, 410])
++        self.right_splitter.setSizes([180, 200, 420])
++        self.setCentralWidget(self.main_splitter)
++
++    def _restore_workspace_layout(self) -> None:
++        geometry = self._ui_settings.value("window/geometry")
++        if geometry is not None:
++            self.restoreGeometry(geometry)
++        main_state = self._ui_settings.value("window/main_state")
++        if main_state is not None:
++            self.restoreState(main_state)
++        main_splitter_state = self._ui_settings.value("layout/main_splitter")
++        if main_splitter_state is not None:
++            self.main_splitter.restoreState(main_splitter_state)
++        else:
++            self.main_splitter.setSizes([250, 850, 410])
++        right_splitter_state = self._ui_settings.value("layout/right_splitter")
++        if right_splitter_state is not None:
++            self.right_splitter.restoreState(right_splitter_state)
++        else:
++            self.right_splitter.setSizes([180, 200, 420])
++        for panel, action in self._panel_actions.items():
++            key = f"layout/panel_visible/{panel.objectName()}"
++            visible = self._ui_settings.value(key, True, type=bool)
++            panel.setVisible(visible)
++            action.setChecked(visible)
++        candidates_visible = self._ui_settings.value(
++            "view/qet_source_candidates_visible", True, type=bool
++        )
++        self.show_source_candidates_action.setChecked(candidates_visible)
++
++    def _save_workspace_layout(self) -> None:
++        self._ui_settings.setValue("window/geometry", self.saveGeometry())
++        self._ui_settings.setValue("window/main_state", self.saveState())
++        self._ui_settings.setValue("layout/main_splitter", self.main_splitter.saveState())
++        self._ui_settings.setValue("layout/right_splitter", self.right_splitter.saveState())
++        for panel in self._panel_actions:
++            self._ui_settings.setValue(
++                f"layout/panel_visible/{panel.objectName()}", not panel.isHidden()
++            )
++        self._ui_settings.setValue(
++            "view/qet_source_candidates_visible",
++            self.show_source_candidates_action.isChecked(),
++        )
++        self._ui_settings.sync()
++
++    def _reset_workspace_layout(self) -> None:
++        self.resize(1600, 1000)
++        for panel, action in self._panel_actions.items():
++            panel.show()
++            action.setChecked(True)
++        self.main_splitter.setSizes([230, 910, 440])
++        self.right_splitter.setSizes([180, 200, 420])
++        self.show_source_candidates_action.setChecked(True)
++        self.canvas.set_source_candidate_visibility(True)
++        self.statusBar().showMessage(
++            "Workspace reset. Drag the visible splitter grips to resize columns and panels.",
++            6500,
++        )
++        self._save_workspace_layout()
++
++    def _set_source_candidate_visibility(self, visible: bool) -> None:
++        self.canvas.set_source_candidate_visibility(visible)
++        state = "visible" if visible else "hidden"
++        self.statusBar().showMessage(
++            f"QET drawing-only reference candidates are now {state}; they are never electrical equipment.",
++            6000,
++        )
++
++    def _on_qet_symbol_selected(self, asset_id: str) -> None:
++        self.statusBar().showMessage(
++            f"Source drawing symbol selected: {asset_id}. Inserted symbols remain drawing-only "
++            "until an explicit electrical equipment mapping is implemented.",
++            9000,
++        )
+ 
+     def _connect_canvas(self) -> None:
+         self.canvas.element_selected.connect(self._inspect_element)
+         self.canvas.layout_changed.connect(self._mark_dirty)
+         self.canvas.position_committed.connect(self._record_move)
++        self.canvas.rotate_symbol_requested.connect(self._rotate_diagram_symbol_by_identifier)
++        self.canvas.remove_symbol_requested.connect(self._remove_selected)
++
++    def _insert_qet_symbol(self, asset_id: str, rotation_deg: float = 0.0) -> None:
++        try:
++            definition = self.symbol_browser.definition_for_asset(asset_id)
++        except KeyError as exc:
++            QMessageBox.warning(self, "Insert Source Symbol", str(exc))
++            return
++        center = self.canvas.mapToScene(self.canvas.viewport().rect().center())
++        # A source symbol is positioned by its declared hotspot, not by a guessed
++        # top-left corner. This keeps the electrical reference point under the cursor.
++        anchor_x = center.x()
++        anchor_y = center.y()
++        if self.workspace.snap_enabled:
++            grid = self.workspace.grid_spacing
++            anchor_x = round(anchor_x / grid) * grid
++            anchor_y = round(anchor_y / grid) * grid
++        x = anchor_x - definition.hotspot.x
++        y = anchor_y - definition.hotspot.y
++        placement = DiagramSymbolPlacement.create(asset_id, x, y, rotation_deg)
++        self._undo_stack.push(_AddDiagramSymbolCommand(self, placement, definition))
++        self.canvas.setFocus()
++        self.statusBar().showMessage(
++            "Placed as a source drawing candidate only. It is not an approved one-line symbol "
++            "or an electrical network component.",
++            9000,
++        )
++
++    def _add_diagram_symbol(self, placement: DiagramSymbolPlacement, definition) -> None:
++        self.workspace.add_diagram_symbol(placement)
++        self.canvas.insert_diagram_symbol(placement, definition)
++        self._refresh_explorer()
++        self._mark_dirty()
++        self._log(
++            f"Inserted drawing symbol {placement.asset_id} · rotation {placement.rotation_deg:g}°. "
++            "No electrical topology was inferred."
++        )
++
++    def _remove_diagram_symbol(self, instance_id: UUID) -> None:
++        self.workspace.remove_diagram_symbol(instance_id)
++        self.canvas.remove_diagram_symbol(instance_id)
++        self._refresh_explorer()
++        self._clear_properties()
++        self._mark_dirty()
++
++    def _apply_diagram_symbol_rotation(self, instance_id: UUID, rotation_deg: float) -> None:
++        self.canvas.set_diagram_symbol_rotation(instance_id, rotation_deg)
++        self._inspect_element("diagram_symbol", str(instance_id))
++        self._mark_dirty()
++
++    def _rotate_selected_symbol(self, delta_deg: float) -> None:
++        selected = self.canvas.selected_diagram_symbol()
++        if selected is None:
++            self.statusBar().showMessage(
++                "Select a placed source drawing symbol on the diagram first.", 5000
++            )
++            return
++        identifier, _current = selected
++        self._rotate_diagram_symbol_by_identifier(str(identifier), delta_deg)
++
++    def _rotate_diagram_symbol_by_identifier(
++        self, identifier: str, delta_deg: float
++    ) -> None:
++        try:
++            placement_id = UUID(identifier)
++            placement = self.workspace.diagram_symbols[placement_id]
++        except (ValueError, KeyError) as exc:
++            self._log(f"Cannot rotate drawing symbol {identifier}: {exc}")
++            return
++        target = (placement.rotation_deg + float(delta_deg)) % 360.0
++        if abs(target - placement.rotation_deg) < 1e-9:
++            return
++        self._undo_stack.push(
++            _RotateDiagramSymbolCommand(
++                self, placement_id, placement.rotation_deg, target
++            )
++        )
+ 
+     # --------------------------------------------------------------- projects
+     def _confirm_discard(self) -> bool:
+@@ -346,6 +679,7 @@ class WorkbenchWindow(QMainWindow):
+         self.project = self.services.project_workspace.create(name)
+         self.workspace = NetworkWorkspace(Network("Network 1"))
+         self.project_path = None
++        self._undo_stack.clear()
+         self._session_runs.clear()
+         self._active_execution = None
+         self.results.clear()
+@@ -365,6 +699,7 @@ class WorkbenchWindow(QMainWindow):
+         )
+         self.workspace = template.workspace
+         self.project_path = None
++        self._undo_stack.clear()
+         self._session_runs.clear()
+         self._active_execution = None
+         self.results.clear()
+@@ -403,6 +738,7 @@ class WorkbenchWindow(QMainWindow):
+         self.project = project
+         self.workspace = workspace
+         self.project_path = path
++        self._undo_stack.clear()
+         self._active_execution = None
+         self.results.clear()
+         self.export_action.setEnabled(False)
+@@ -446,6 +782,7 @@ class WorkbenchWindow(QMainWindow):
+ 
+     def closeEvent(self, event) -> None:
+         if self._confirm_discard():
++            self._save_workspace_layout()
+             event.accept()
+         else:
+             event.ignore()
+@@ -559,6 +896,23 @@ class WorkbenchWindow(QMainWindow):
+             QMessageBox.warning(self, "Add Transmission Line", str(exc))
+ 
+     def _remove_selected(self) -> None:
++        selected_symbol = self.canvas.selected_diagram_symbol()
++        if selected_symbol is not None:
++            identifier, _rotation = selected_symbol
++            placement = self.workspace.diagram_symbols.get(identifier)
++            if placement is not None:
++                try:
++                    definition = self.symbol_browser.definition_for_asset(placement.asset_id)
++                except KeyError:
++                    QMessageBox.warning(
++                        self, "Remove Drawing Symbol",
++                        "The source asset is unavailable; the drawing object cannot be safely edited.",
++                    )
++                    return
++                self._undo_stack.push(
++                    _RemoveDiagramSymbolCommand(self, placement, definition)
++                )
++            return
+         selected = self.explorer.selectedItems()
+         if not selected:
+             return
+@@ -642,10 +996,13 @@ class WorkbenchWindow(QMainWindow):
+     def _set_editing_enabled(self, enabled: bool) -> None:
+         for widget in (
+             self.explorer,
+-            self.palette_dock,
++            self.palette_panel,
++            self.properties,
++            self.symbol_browser,
+             self.canvas,
+             self.quick_toolbar,
+             self.model_toolbar,
++            self.diagram_toolbar,
+             self.analysis_toolbar,
+         ):
+             widget.setEnabled(enabled)
+@@ -723,26 +1080,56 @@ class WorkbenchWindow(QMainWindow):
+         path = Path(selected)
+         if path.suffix.lower() != ".svg":
+             path = path.with_suffix(".svg")
+-        bounds = scene.itemsBoundingRect().adjusted(-48.0, -48.0, 48.0, 48.0)
+-        if bounds.isEmpty():
+-            QMessageBox.warning(self, "Export One-Line Diagram", "The diagram has no exportable geometry.")
+-            return
+-        generator = QSvgGenerator()
+-        generator.setFileName(str(path))
+-        generator.setTitle(f"{self.project.name} — POWER_FAULT_ANALYZER")
+-        generator.setDescription("Vector export of the physical power-system one-line diagram.")
+-        generator.setSize(bounds.size().toSize())
+-        generator.setViewBox(bounds)
+-        painter = QPainter()
+-        if not painter.begin(generator):
+-            QMessageBox.critical(self, "Export One-Line Diagram", "Could not initialize SVG output.")
+-            return
++        source_candidates = self.canvas.source_candidate_items()
++        prior_visibility = [item.isVisible() for item in source_candidates]
++        prior_grid_visibility = self.canvas.grid_visible
++        self.canvas.set_source_candidate_visibility(False)
++        self.canvas.set_grid_visible(False)
+         try:
+-            scene.render(painter, QRectF(0.0, 0.0, bounds.width(), bounds.height()), bounds)
++            visible_bounds = QRectF()
++            for item in scene.items():
++                if item.isVisible():
++                    visible_bounds = visible_bounds.united(item.sceneBoundingRect())
++            bounds = visible_bounds.adjusted(-48.0, -48.0, 48.0, 48.0)
++            if visible_bounds.isEmpty() or bounds.isEmpty():
++                QMessageBox.warning(
++                    self,
++                    "Export One-Line Diagram",
++                    "No electrical one-line geometry is available to export. "
++                    "QET drawing-only candidates are excluded from the engineering SLD.",
++                )
++                return
++            generator = QSvgGenerator()
++            generator.setFileName(str(path))
++            generator.setTitle(f"{self.project.name} — POWER_FAULT_ANALYZER")
++            generator.setDescription(
++                "Vector export of mapped physical power-system elements; "
++                "unmapped QET source candidates are excluded."
++            )
++            generator.setSize(bounds.size().toSize())
++            generator.setViewBox(bounds)
++            painter = QPainter()
++            if not painter.begin(generator):
++                QMessageBox.critical(
++                    self, "Export One-Line Diagram", "Could not initialize SVG output."
++                )
++                return
++            try:
++                scene.render(
++                    painter,
++                    QRectF(0.0, 0.0, bounds.width(), bounds.height()),
++                    bounds,
++                )
++            finally:
++                painter.end()
+         finally:
+-            painter.end()
+-        self._log(f"One-line diagram SVG exported: {path}")
+-        self.statusBar().showMessage(f"Vector diagram exported: {path.name}", 6000)
++            for item, visible in zip(source_candidates, prior_visibility, strict=True):
++                item.setVisible(visible)
++            self.canvas.set_grid_visible(prior_grid_visibility)
++        self._log(f"One-line diagram SVG exported (unmapped QET candidates and grid excluded): {path}")
++        self.statusBar().showMessage(
++            f"Vector SLD exported without QET candidates or design grid: {path.name}", 7000
++        )
+ 
+     def _export_report(self) -> None:
+         if self._active_execution is None:
+@@ -777,7 +1164,12 @@ class WorkbenchWindow(QMainWindow):
+ 
+     def _apply_diagram_position(self, identifier: str, x: float, y: float) -> None:
+         self.canvas.apply_position(identifier, x, y)
+-        self.workspace.diagram_positions[UUID(identifier)] = (x, y)
++        object_id = UUID(identifier)
++        if object_id in self.workspace.diagram_symbols:
++            self.workspace.update_diagram_symbol(object_id, x=x, y=y)
++            self._inspect_element("diagram_symbol", identifier)
++        else:
++            self.workspace.diagram_positions[object_id] = (x, y)
+         self._dirty = True
+         self._update_title()
+ 
+@@ -840,6 +1232,20 @@ class WorkbenchWindow(QMainWindow):
+             unavailable.setToolTip(0, reason)
+             unavailable.setFlags(unavailable.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+             network_node.addChild(unavailable)
++        drawing_symbols = QTreeWidgetItem(
++            [f"Diagram-only Symbols ({len(self.workspace.diagram_symbols)})"]
++        )
++        root.addChild(drawing_symbols)
++        for placement in self.workspace.diagram_symbols.values():
++            try:
++                definition = self.symbol_browser.definition_for_asset(placement.asset_id)
++                label = definition.name_for("es")
++            except KeyError:
++                label = f"Missing source asset: {placement.asset_id}"
++            leaf = QTreeWidgetItem([label])
++            leaf.setData(0, Qt.ItemDataRole.UserRole, ("diagram_symbol", str(placement.instance_id)))
++            drawing_symbols.addChild(leaf)
++
+         studies = QTreeWidgetItem([f"Fault Studies ({len(self._session_runs)})"])
+         root.addChild(studies)
+         for record in self.workspace.study_history:
+@@ -884,7 +1290,7 @@ class WorkbenchWindow(QMainWindow):
+                 )
+             return
+         if isinstance(data, tuple) and len(data) == 2 and data[0] in {
+-            "bus", "line", "equivalent_source", "synchronous_generator"
++            "bus", "line", "equivalent_source", "synchronous_generator", "diagram_symbol"
+         }:
+             self.canvas.select_element(UUID(data[1]))
+             self._inspect_element(*data)
+@@ -895,7 +1301,23 @@ class WorkbenchWindow(QMainWindow):
+             return
+         try:
+             object_id = UUID(identifier)
+-            if kind == "bus":
++            if kind == "diagram_symbol":
++                placement = self.workspace.diagram_symbols[object_id]
++                definition = self.symbol_browser.definition_for_asset(placement.asset_id)
++                rows = (
++                    ("Element type", "Source drawing symbol"),
++                    ("Symbol", definition.name_for("es")),
++                    ("Source asset ID", placement.asset_id),
++                    ("Rotation", f"{placement.rotation_deg:g}°"),
++                    ("Position X", f"{placement.x:g}"),
++                    ("Position Y", f"{placement.y:g}"),
++                    ("License", definition.provenance.license_identifier),
++                    ("Source status", "Unverified QET drawing candidate"),
++                    ("Normative status", definition.provenance.normative_status),
++                    ("SLD export", "Excluded until explicitly mapped and approved"),
++                    ("Electrical mapping", "Not mapped — drawing-only object; excluded from network topology."),
++                )
++            elif kind == "bus":
+                 element = self.workspace.network.get_bus(object_id)
+                 rows = (
+                     ("Element type", "AC Bus"),
+@@ -1002,7 +1424,7 @@ class WorkbenchWindow(QMainWindow):
+             self,
+             "About POWER_FAULT_ANALYZER",
+             "POWER_FAULT_ANALYZER Engineering Workbench\n"
+-            "APP-REBOOT-001\n\n"
++            "APP-REBOOT-004 · Resizable workbench / drawing candidates\n\n"
+             "Electrical calculations are executed by the existing numerical engine. "
+             "The graphical diagram is presentation metadata; network topology is held by the domain aggregate.",
+         )
+@@ -1033,6 +1455,12 @@ QPushButton:pressed { background: #dbeafe; }
+ QLineEdit, QDoubleSpinBox, QComboBox { background: #ffffff; color: #172033; border: 1px solid #cbd5e1; border-radius: 4px; padding: 5px; }
+ QHeaderView::section { background: #e9eff6; color: #243247; padding: 6px; border: 0; border-right: 1px solid #d7dee8; }
+ QStatusBar { background: #e7edf5; color: #334155; border-top: 1px solid #d7dee8; }
++QFrame[workbenchPanel="true"] { background: #f8fafc; border: 1px solid #d7e0ea; }
++QLabel#WorkbenchPanelHeading { color: #334155; font-weight: 700; letter-spacing: 0.8px; padding: 2px 1px; }
++QSplitter::handle { background: #cbd6e2; border: 1px solid #b7c4d3; }
++QSplitter::handle:hover { background: #8ca6c4; border-color: #5d7899; }
++QSplitter::handle:horizontal { width: 14px; margin: 0 1px; }
++QSplitter::handle:vertical { height: 14px; margin: 1px 0; }
+ """
+ 
+ _DARK_WORKBENCH_STYLESHEET = """
+@@ -1045,6 +1473,10 @@ QPushButton, QToolButton { background: #263649; color: #f8fafc; border: 1px soli
+ QLineEdit, QDoubleSpinBox, QComboBox, QTableWidget { background: #101923; color: #e5edf5; border: 1px solid #50647a; }
+ QTabBar::tab { background: #263649; color: #dbe5ef; padding: 8px 14px; }
+ QTabBar::tab:selected { background: #101923; color: #ffffff; }
++QSplitter::handle { background: #40556c; border: 1px solid #5b7088; }
++QSplitter::handle:hover { background: #7895b5; border-color: #9cb5d1; }
++QSplitter::handle:horizontal { width: 14px; margin: 0 1px; }
++QSplitter::handle:vertical { height: 14px; margin: 1px 0; }
+ """
+ 
+ def _sequence_value(value) -> str:
+diff --git a/tests/unit/application/test_workbench_network_workspace.py b/tests/unit/application/test_workbench_network_workspace.py
+index 6c0a25d..24c61c3 100644
+--- a/tests/unit/application/test_workbench_network_workspace.py
++++ b/tests/unit/application/test_workbench_network_workspace.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+ 
++import json
+ from pathlib import Path
+ from uuid import uuid4
+ 
+@@ -11,6 +12,7 @@ from power_fault_analyzer.application.use_cases.network_editing import (
+     LineInput,
+ )
+ from power_fault_analyzer.application.use_cases.network_workspace import (
++    DiagramSymbolPlacement,
+     NetworkStudyRecord,
+     NetworkWorkspace,
+ )
+@@ -111,6 +113,56 @@ def test_network_document_round_trip_preserves_model_and_diagram_layout(tmp_path
+     assert loaded.study_history[0].fault_bus_id == template.fault_bus_id
+ 
+ 
++def test_diagram_symbol_placement_is_independent_and_rotation_is_normalized() -> None:
++    placement = DiagramSymbolPlacement.create(
++        "IEC-GEN-SYNC-3PH-NEUTRAL", 125.0, 240.0, 450.0
++    )
++    workspace = NetworkWorkspace(Network("drawing-only symbol"))
++    workspace.add_diagram_symbol(placement)
++
++    assert placement.rotation_deg == pytest.approx(90.0)
++    assert not workspace.network.buses
++    assert not workspace.network.equipment
++    assert not workspace.network.connections
++    assert workspace.diagram_symbols[placement.instance_id] == placement
++
++    updated = workspace.update_diagram_symbol(
++        placement.instance_id, x=150.0, rotation_deg=-90.0
++    )
++    assert updated.x == pytest.approx(150.0)
++    assert updated.rotation_deg == pytest.approx(270.0)
++    assert workspace.diagram_symbols[placement.instance_id] == updated
++
++
++def test_network_document_round_trip_preserves_drawing_symbol_instances(tmp_path: Path) -> None:
++    workspace = BuildReferenceNetworkTemplate().execute("REF-3PH-001").workspace
++    placement = DiagramSymbolPlacement.create(
++        "IEC-GEN-SYNC-3PH-NEUTRAL", 310.0, 180.0, 270.0
++    )
++    workspace.add_diagram_symbol(placement)
++
++    path = JSONNetworkDocumentRepository().save(workspace, tmp_path / "diagram-symbol.pfan")
++    loaded = JSONNetworkDocumentRepository().load(path)
++
++    assert loaded.diagram_symbols == {placement.instance_id: placement}
++    assert loaded.network.id == workspace.network.id
++    assert len(loaded.network.equipment) == len(workspace.network.equipment)
++    assert loaded.network.equipment[0].id == workspace.network.equipment[0].id
++
++
++def test_network_document_loads_legacy_1_0_without_symbol_array(tmp_path: Path) -> None:
++    workspace = BuildReferenceNetworkTemplate().execute("REF-3PH-001").workspace
++    path = JSONNetworkDocumentRepository().save(workspace, tmp_path / "legacy.pfan")
++    payload = json.loads(path.read_text(encoding="utf-8"))
++    payload["diagram"].pop("symbols", None)
++    path.write_text(json.dumps(payload), encoding="utf-8")
++
++    loaded = JSONNetworkDocumentRepository().load(path)
++
++    assert loaded.diagram_symbols == {}
++    assert loaded.network.id == workspace.network.id
++
++
+ def test_network_workspace_rejects_layout_positions_for_nonexistent_elements() -> None:
+     network = Network("layout validation")
+ 
+diff --git a/tests/unit/interfaces/desktop/workbench/test_qet_symbol_item.py b/tests/unit/interfaces/desktop/workbench/test_qet_symbol_item.py
+index db7d3ba..bc63db0 100644
+--- a/tests/unit/interfaces/desktop/workbench/test_qet_symbol_item.py
++++ b/tests/unit/interfaces/desktop/workbench/test_qet_symbol_item.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import os
++from uuid import uuid4
+ 
+ import pytest
+ 
+@@ -14,9 +15,9 @@ from power_fault_analyzer.infrastructure.symbols.qet_elmt import (
+ def _qt_dependencies():
+     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+     pytest.importorskip("PySide6")
+-    from PySide6.QtCore import QRectF
++    from PySide6.QtCore import QPointF, QRectF
+     from PySide6.QtGui import QImage, QPainter
+-    from PySide6.QtWidgets import QApplication, QGraphicsScene
++    from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsScene
+ 
+     from power_fault_analyzer.interfaces.desktop.workbench.qet_symbol_item import (
+         QETSymbolItem,
+@@ -24,28 +25,18 @@ def _qt_dependencies():
+     )
+ 
+     return (
++        QPointF,
+         QRectF,
+         QImage,
+         QPainter,
+         QApplication,
++        QGraphicsItem,
+         QGraphicsScene,
+         QETSymbolItem,
+         UnsupportedQETPrimitiveError,
+     )
+ 
+ 
+-XML = b'''<definition version="0.100.0" type="element" width="20" height="20" hotspot_x="10" hotspot_y="10">
+-<uuid uuid="{11223344-5566-7788-99aa-bbccddeeff00}"/>
+-<names><name lang="en">Test resistor</name></names>
+-<informations>Author: Test
+-License: CC BY 3.0</informations>
+-<description>
+-<rect x="-10" y="-10" width="20" height="20" style="line-style:normal;line-weight:normal;filling:none;color:black"/>
+-<line x1="-10" y1="0" x2="-5" y2="0"/>
+-<terminal uuid="{01223344-5566-7788-99aa-bbccddeeff00}" name="A" x="-10" y="0" orientation="w" type="Generic"/>
+-</description></definition>'''
+-
+-
+ def _application(application_type):
+     instance = application_type.instance()
+     return instance if instance is not None else application_type([])
+@@ -62,12 +53,26 @@ def _definition():
+     return parse_qet_elmt(XML, provenance=provenance)
+ 
+ 
++XML = b'''<definition version="0.100.0" type="element" width="20" height="20" hotspot_x="10" hotspot_y="10">
++<uuid uuid="{11223344-5566-7788-99aa-bbccddeeff00}"/>
++<names><name lang="en">Test resistor</name></names>
++<informations>Author: Test
++License: CC BY 3.0</informations>
++<description>
++<rect x="-10" y="-10" width="20" height="20" style="line-style:normal;line-weight:normal;filling:none;color:black"/>
++<line x1="-10" y1="0" x2="-5" y2="0"/>
++<terminal uuid="{01223344-5566-7788-99aa-bbccddeeff00}" name="A" x="-10" y="0" orientation="w" type="Generic"/>
++</description></definition>'''
++
++
+ def test_qet_graphics_item_preserves_terminal_anchor_and_paints() -> None:
+     (
++        _,
+         QRectF,
+         QImage,
+         QPainter,
+         QApplication,
++        _,
+         QGraphicsScene,
+         QETSymbolItem,
+         _,
+@@ -90,8 +95,32 @@ def test_qet_graphics_item_preserves_terminal_anchor_and_paints() -> None:
+     assert not image.isNull()
+ 
+ 
++def test_interactive_qet_item_is_movable_and_rotatable_around_source_hotspot() -> None:
++    QPointF, _, _, _, QApplication, QGraphicsItem, _, QETSymbolItem, _ = _qt_dependencies()
++    _application(QApplication)
++    definition = _definition()
++    item = QETSymbolItem(
++        definition, interactive=True, instance_id=uuid4(), rotation_deg=90.0
++    )
++
++    assert item.rotation() == pytest.approx(90.0)
++    assert item.transformOriginPoint().x() == pytest.approx(definition.hotspot.x)
++    assert item.transformOriginPoint().y() == pytest.approx(definition.hotspot.y)
++    assert item.flags().testFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
++    assert item.flags().testFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
++    item.setPos(QPointF(13.0, 11.0))
++    # Snap the declared hotspot (not an arbitrary top-left bounding-box corner).
++    assert item.pos().x() == pytest.approx(10.0)
++    assert item.pos().y() == pytest.approx(10.0)
++    anchor = item.mapToScene(item.transformOriginPoint())
++    assert anchor.x() == pytest.approx(20.0)
++    assert anchor.y() == pytest.approx(20.0)
++
++
+ def test_qet_graphics_item_refuses_unsupported_primitive() -> None:
+-    _, _, _, QApplication, _, QETSymbolItem, UnsupportedQETPrimitiveError = _qt_dependencies()
++    (
++        _, _, _, _, QApplication, _, _, QETSymbolItem, UnsupportedQETPrimitiveError
++    ) = _qt_dependencies()
+     _application(QApplication)
+     changed = XML.replace(b"<description>", b"<description><bezier x1='0' y1='0' />", 1)
+     provenance = SymbolProvenance(
+diff --git a/website/index.html b/website/index.html
+new file mode 100644
+index 0000000..513325a
+--- /dev/null
++++ b/website/index.html
+@@ -0,0 +1,32 @@
++<!doctype html>
++<html lang="en" data-github-repository="YOUR_GITHUB_OWNER/POWER_FAULT_ANALYZER">
++<head>
++  <meta charset="utf-8">
++  <meta name="viewport" content="width=device-width, initial-scale=1">
++  <meta name="theme-color" content="#101b2b">
++  <title>POWER_FAULT_ANALYZER — Power-system engineering</title>
++  <meta name="description" content="A desktop engineering workbench for power-system modelling, one-line diagrams and short-circuit studies.">
++  <link rel="stylesheet" href="styles.css">
++</head>
++<body>
++  <header class="topbar"><a class="brand" href="#top"><span class="mark">PFA</span><span>POWER_FAULT_ANALYZER</span></a><nav><a href="#features">Platform</a><a href="#engineering">Engineering</a><a id="source-nav" href="#source">Source code</a></nav></header>
++  <main id="top">
++    <section class="hero">
++      <div class="eyebrow">POWER-SYSTEM ENGINEERING PLATFORM</div>
++      <h1>Model the grid.<br><em>Understand the fault.</em></h1>
++      <p class="lead">A desktop engineering workbench for building power-system networks, preparing single-line diagrams and running traceable electrical studies.</p>
++      <div class="actions"><a class="button primary" id="download" href="#release" aria-disabled="true">Checking latest Windows release…</a><a class="button secondary" id="source" href="#source">View source</a></div>
++      <div class="release-meta" id="release-meta">Windows x64 · Standalone desktop application · SHA-256 published with each release</div>
++      <div class="release-note" id="release-note" role="status">The public release endpoint will appear here once the repository is configured and a verified release is published.</div>
++    </section>
++    <section class="features" id="features">
++      <article><span>01 / MODEL</span><h2>Physical network first</h2><p>Buses, equipment, terminals and topology remain authoritative engineering data, separate from drawing geometry.</p></article>
++      <article><span>02 / DIAGRAM</span><h2>One-line design</h2><p>Source-based symbols, movable placements, rotation, document layout and vector export.</p></article>
++      <article><span>03 / ANALYZE</span><h2>Reproducible studies</h2><p>Short-circuit analysis, saved project state, engineering results and traceable reports.</p></article>
++    </section>
++    <section class="engineering" id="engineering"><div><div class="eyebrow">BUILT FOR ENGINEERS</div><h2>Not a diagramming toy.</h2></div><p>PFA is being developed as a community-oriented engineering platform. Every release must pass automated tests and source-asset verification. The application license and third-party redistribution notices will be published explicitly before the first public binary. Symbols without an explicit model mapping are identified as drawing-only; they are never silently treated as electrical equipment.</p></section>
++    <footer><span>POWER_FAULT_ANALYZER</span><span>Engineering software · Verified release assets</span><a id="source-footer" href="#source">Repository</a></footer>
++  </main>
++  <script src="release.js"></script>
++</body>
++</html>
+diff --git a/website/release.js b/website/release.js
+new file mode 100644
+index 0000000..17783cf
+--- /dev/null
++++ b/website/release.js
+@@ -0,0 +1,33 @@
++(() => {
++  const repository = document.documentElement.dataset.githubRepository || '';
++  const download = document.getElementById('download');
++  const source = document.getElementById('source');
++  const sourceNav = document.getElementById('source-nav');
++  const footer = document.getElementById('source-footer');
++  const note = document.getElementById('release-note');
++  if (!repository || repository.includes('YOUR_GITHUB_OWNER')) {
++    download.textContent = 'Release not configured yet';
++    download.setAttribute('aria-disabled', 'true');
++    note.textContent = 'Before publishing this page, set data-github-repository in website/index.html to the public GitHub owner/repository.';
++    return;
++  }
++  const repositoryUrl = `https://github.com/${repository}`;
++  source.href = repositoryUrl;
++  sourceNav.href = repositoryUrl;
++  footer.href = repositoryUrl;
++  fetch(`https://api.github.com/repos/${repository}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } })
++    .then(response => { if (!response.ok) throw new Error(`No public release (${response.status})`); return response.json(); })
++    .then(release => {
++      const asset = (release.assets || []).find(item => item.name === 'PFA-Windows-x64.zip');
++      if (!asset) throw new Error('The latest release does not contain PFA-Windows-x64.zip.');
++      download.href = asset.browser_download_url;
++      download.removeAttribute('aria-disabled');
++      download.textContent = `Download for Windows · ${release.tag_name}`;
++      note.textContent = `${release.name || release.tag_name} · ${new Date(release.published_at).toLocaleDateString()} · ZIP package`;
++    })
++    .catch(error => {
++      download.textContent = 'No verified release available';
++      download.setAttribute('aria-disabled', 'true');
++      note.textContent = `${error.message}. Download links activate only after a published release includes the verified Windows asset.`;
++    });
++})();
+diff --git a/website/styles.css b/website/styles.css
+new file mode 100644
+index 0000000..5f74049
+--- /dev/null
++++ b/website/styles.css
+@@ -0,0 +1,2 @@
++@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
++:root{color-scheme:dark;--bg:#0b1320;--panel:#111e2e;--ink:#edf3fa;--muted:#9bacbf;--line:#26384d;--accent:#9cc8ff;--green:#a9d7c0}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(ellipse at 75% 0%,#1b3552 0,transparent 34%),var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif}.topbar{height:76px;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(22px,6vw,100px);border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:12px;color:var(--ink);text-decoration:none;font:700 13px 'DM Mono',monospace;letter-spacing:.06em}.mark{display:grid;place-items:center;width:36px;height:30px;border:1px solid #6583a5;color:var(--accent);font:500 12px 'DM Mono',monospace}.topbar nav{display:flex;gap:28px}.topbar nav a,footer a{color:var(--muted);text-decoration:none;font-size:13px}.topbar nav a:hover,footer a:hover{color:var(--ink)}main{max-width:1200px;margin:auto;padding:0 34px}.hero{padding:116px 0 90px;max-width:790px}.eyebrow{font:500 11px 'DM Mono',monospace;letter-spacing:.17em;color:var(--green)}h1,h2{font-family:Manrope,sans-serif;letter-spacing:-.055em}h1{font-size:clamp(52px,8vw,94px);line-height:.99;margin:24px 0 25px;font-weight:700}h1 em{color:var(--accent);font-style:normal}.lead{max-width:650px;font-size:18px;line-height:1.7;color:#bdcad8}.actions{display:flex;gap:13px;margin-top:32px}.button{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 19px;border-radius:3px;font-weight:700;text-decoration:none;font-size:13px}.primary{background:#c9e0fa;color:#102039}.primary[aria-disabled=true]{opacity:.6;pointer-events:none}.secondary{border:1px solid #52677f;color:var(--ink)}.release-meta{margin-top:19px;color:var(--muted);font:11px 'DM Mono',monospace}.release-note{margin-top:17px;color:#b6c5d5;font-size:13px}.features{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.features article{padding:29px 27px 32px 0}.features article+article{border-left:1px solid var(--line);padding-left:27px}.features article span{font:11px 'DM Mono',monospace;color:var(--green)}.features h2{font-size:20px;letter-spacing:-.03em;margin:17px 0 10px}.features p,.engineering p{font-size:14px;line-height:1.7;color:var(--muted);margin:0}.engineering{display:grid;grid-template-columns:1fr 1.2fr;gap:80px;padding:85px 0}.engineering h2{font-size:38px;margin:16px 0 0}.engineering p{max-width:580px;font-size:15px}footer{border-top:1px solid var(--line);padding:25px 0 32px;display:flex;gap:30px;justify-content:space-between;color:var(--muted);font:11px 'DM Mono',monospace}footer span:first-child{color:var(--ink)}@media(max-width:720px){.topbar nav{gap:12px}.topbar nav a{font-size:11px}main{padding:0 22px}.hero{padding:80px 0 65px}.features{grid-template-columns:1fr}.features article,.features article+article{border-left:0;padding:24px 0;border-bottom:1px solid var(--line)}.engineering{grid-template-columns:1fr;gap:22px;padding:60px 0}footer{flex-wrap:wrap;gap:12px}}
+-- 
+2.47.3
+

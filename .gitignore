@@ -1,0 +1,31 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.nd016-ruff-cli-backup
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# IDE / local secrets
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+*.sqlite3
+*.db
+*.log
+
+# Build outputs and local evidence
+build/
+dist/
+*.spec
+outputs/
+
+# OS
+.DS_Store
+Thumbs.db

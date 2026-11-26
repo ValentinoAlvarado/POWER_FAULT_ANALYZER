@@ -1,0 +1,1054 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_id": "PFA-ND016-ANALYTICAL-FAULTS-001",
+  "reference_basis": "Academic closed-form symmetrical-components reference cases; not IEC 60909 normative benchmark values.",
+  "benchmark": {
+    "dataset_id": "PFA-ND016-ANALYTICAL-FAULTS-001",
+    "reference_basis": "Academic closed-form symmetrical-components reference cases; not IEC 60909 normative benchmark values.",
+    "passed": true,
+    "passed_cases": 4,
+    "total_cases": 4,
+    "passed_comparisons": 44,
+    "failed_comparisons": 0,
+    "total_comparisons": 44,
+    "cases": [
+      {
+        "case_id": "REF-3PH-001",
+        "title": "Three-phase bolted-equivalent network fault with complex fault impedance",
+        "passed": true,
+        "comparisons": [
+          {
+            "quantity": "sequence_current_zero",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "actual": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "sequence_current_positive",
+            "unit": "p.u.",
+            "expected": {
+              "real": 1.0721120186697783,
+              "imag": -2.927187864644107
+            },
+            "actual": {
+              "real": 1.0721120186697783,
+              "imag": -2.927187864644107
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 4.117347105392005e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "sequence_current_negative",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "actual": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_A",
+            "unit": "p.u.",
+            "expected": {
+              "real": 1.0721120186697783,
+              "imag": -2.927187864644107
+            },
+            "actual": {
+              "real": 1.0721120186697783,
+              "imag": -2.927187864644107
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 4.117347105392005e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_A",
+            "unit": "kA",
+            "expected": {
+              "real": 4.485392482466881,
+              "imag": -12.246468852325224
+            },
+            "actual": {
+              "real": 4.485392482466881,
+              "imag": -12.246468852325224
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 2.304203761199692e-08,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_B",
+            "unit": "p.u.",
+            "expected": {
+              "real": -3.0710750617662104,
+              "imag": 0.5351176884514103
+            },
+            "actual": {
+              "real": -3.0710750617662104,
+              "imag": 0.5351176884514103
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 4.117347105392005e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_B",
+            "unit": "kA",
+            "expected": {
+              "real": -12.848449374001943,
+              "imag": 2.2387705904025506
+            },
+            "actual": {
+              "real": -12.848449374001943,
+              "imag": 2.2387705904025506
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 2.304203761199692e-08,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_C",
+            "unit": "p.u.",
+            "expected": {
+              "real": 1.9989630430964327,
+              "imag": 2.3920701761926972
+            },
+            "actual": {
+              "real": 1.9989630430964327,
+              "imag": 2.3920701761926972
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 4.117347105392005e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_C",
+            "unit": "kA",
+            "expected": {
+              "real": 8.363056891535065,
+              "imag": 10.007698261922675
+            },
+            "actual": {
+              "real": 8.363056891535065,
+              "imag": 10.007698261922675
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 2.304203761199692e-08,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "ground_current",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "actual": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "base_current",
+            "unit": "kA",
+            "expected": 4.183697602823375,
+            "actual": 4.183697602823375,
+            "absolute_error": 0.0,
+            "allowed_error": 4.283697602823375e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "case_id": "REF-SLG-001",
+        "title": "Single-line-to-ground fault on phase A",
+        "passed": true,
+        "comparisons": [
+          {
+            "quantity": "sequence_current_zero",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.3065368311113842,
+              "imag": -0.7386496283098852
+            },
+            "actual": {
+              "real": 0.3065368311113842,
+              "imag": -0.7386496283098852
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1.7997300183375269e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "sequence_current_positive",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.3065368311113842,
+              "imag": -0.7386496283098852
+            },
+            "actual": {
+              "real": 0.3065368311113842,
+              "imag": -0.7386496283098852
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1.7997300183375269e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "sequence_current_negative",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.3065368311113842,
+              "imag": -0.7386496283098852
+            },
+            "actual": {
+              "real": 0.3065368311113842,
+              "imag": -0.7386496283098852
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1.7997300183375269e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_A",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.9196104933341526,
+              "imag": -2.215948884929656
+            },
+            "actual": {
+              "real": 0.9196104933341526,
+              "imag": -2.215948884929656
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 3.3991900550125802e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_A",
+            "unit": "kA",
+            "expected": {
+              "real": 3.8473722164933153,
+              "imag": -9.27086003785933
+            },
+            "actual": {
+              "real": 3.8473722164933153,
+              "imag": -9.27086003785933
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 2.0037485681873813e-08,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_B",
+            "unit": "p.u.",
+            "expected": {
+              "real": 2.220446049250313e-16,
+              "imag": 1.1102230246251565e-16
+            },
+            "actual": {
+              "real": 2.220446049250313e-16,
+              "imag": 1.1102230246251565e-16
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1.0000000000000003e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_B",
+            "unit": "kA",
+            "expected": {
+              "real": 9.289674813447168e-16,
+              "imag": 4.644837406723584e-16
+            },
+            "actual": {
+              "real": 9.289674813447168e-16,
+              "imag": 4.644837406723584e-16
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1.0000000000000002e-08,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_C",
+            "unit": "p.u.",
+            "expected": {
+              "real": 2.220446049250313e-16,
+              "imag": 1.1102230246251565e-16
+            },
+            "actual": {
+              "real": 2.220446049250313e-16,
+              "imag": 1.1102230246251565e-16
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1.0000000000000003e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_C",
+            "unit": "kA",
+            "expected": {
+              "real": 9.289674813447168e-16,
+              "imag": 4.644837406723584e-16
+            },
+            "actual": {
+              "real": 9.289674813447168e-16,
+              "imag": 4.644837406723584e-16
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1.0000000000000002e-08,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "ground_current",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.9196104933341526,
+              "imag": -2.215948884929656
+            },
+            "actual": {
+              "real": 0.9196104933341526,
+              "imag": -2.215948884929656
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 3.3991900550125802e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "base_current",
+            "unit": "kA",
+            "expected": 4.183697602823375,
+            "actual": 4.183697602823375,
+            "absolute_error": 0.0,
+            "allowed_error": 4.283697602823375e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "case_id": "REF-LL-001",
+        "title": "Line-to-line fault between phases B and C",
+        "passed": true,
+        "comparisons": [
+          {
+            "quantity": "sequence_current_zero",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "actual": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "sequence_current_positive",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.5512974531475251,
+              "imag": -1.4823402210475731
+            },
+            "actual": {
+              "real": 0.5512974531475254,
+              "imag": -1.4823402210475733
+            },
+            "absolute_error": 4.002966042486721e-16,
+            "allowed_error": 2.5815376735260897e-09,
+            "relative_error": 2.531059556464424e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "sequence_current_negative",
+            "unit": "p.u.",
+            "expected": {
+              "real": -0.5512974531475251,
+              "imag": 1.4823402210475731
+            },
+            "actual": {
+              "real": -0.5512974531475254,
+              "imag": 1.4823402210475733
+            },
+            "absolute_error": 4.002966042486721e-16,
+            "allowed_error": 2.5815376735260897e-09,
+            "relative_error": 2.531059556464424e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_A",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "actual": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_A",
+            "unit": "kA",
+            "expected": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "actual": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1e-08,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_B",
+            "unit": "p.u.",
+            "expected": {
+              "real": -2.567488576957277,
+              "imag": -0.9548751989348352
+            },
+            "actual": {
+              "real": -2.5674885769572775,
+              "imag": -0.9548751989348359
+            },
+            "absolute_error": 8.005932084973442e-16,
+            "allowed_error": 3.7393036046314666e-09,
+            "relative_error": 2.92261583251942e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_B",
+            "unit": "kA",
+            "expected": {
+              "real": -10.741595804692558,
+              "imag": -3.994909080779163
+            },
+            "actual": {
+              "real": -10.74159580469256,
+              "imag": -3.994909080779166
+            },
+            "absolute_error": 3.2023728339893768e-15,
+            "allowed_error": 2.1460417924102098e-08,
+            "relative_error": 2.7942897503367245e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_C",
+            "unit": "p.u.",
+            "expected": {
+              "real": 2.567488576957277,
+              "imag": 0.9548751989348352
+            },
+            "actual": {
+              "real": 2.5674885769572775,
+              "imag": 0.9548751989348359
+            },
+            "absolute_error": 8.005932084973442e-16,
+            "allowed_error": 3.7393036046314666e-09,
+            "relative_error": 2.92261583251942e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_C",
+            "unit": "kA",
+            "expected": {
+              "real": 10.741595804692558,
+              "imag": 3.994909080779163
+            },
+            "actual": {
+              "real": 10.74159580469256,
+              "imag": 3.994909080779166
+            },
+            "absolute_error": 3.2023728339893768e-15,
+            "allowed_error": 2.1460417924102098e-08,
+            "relative_error": 2.7942897503367245e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "ground_current",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "actual": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 1e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "base_current",
+            "unit": "kA",
+            "expected": 4.183697602823375,
+            "actual": 4.183697602823375,
+            "absolute_error": 0.0,
+            "allowed_error": 4.283697602823375e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "case_id": "REF-DLG-001",
+        "title": "Double-line-to-ground fault on phases B and C",
+        "passed": true,
+        "comparisons": [
+          {
+            "quantity": "sequence_current_zero",
+            "unit": "p.u.",
+            "expected": {
+              "real": -0.21986100829869756,
+              "imag": 0.6303063222424109
+            },
+            "actual": {
+              "real": -0.2198610082986976,
+              "imag": 0.630306322242411
+            },
+            "absolute_error": 1.1443916996305594e-16,
+            "allowed_error": 1.6675514383393043e-09,
+            "relative_error": 1.7143123868888826e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "sequence_current_positive",
+            "unit": "p.u.",
+            "expected": {
+              "real": 0.734267297320682,
+              "imag": -2.000125244212863
+            },
+            "actual": {
+              "real": 0.7342672973206822,
+              "imag": -2.000125244212863
+            },
+            "absolute_error": 2.220446049250313e-16,
+            "allowed_error": 3.130645314558992e-09,
+            "relative_error": 1.0421472002297617e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "sequence_current_negative",
+            "unit": "p.u.",
+            "expected": {
+              "real": -0.5144062890219843,
+              "imag": 1.369818921970452
+            },
+            "actual": {
+              "real": -0.5144062890219846,
+              "imag": 1.369818921970452
+            },
+            "absolute_error": 3.3306690738754696e-16,
+            "allowed_error": 2.4632216883212402e-09,
+            "relative_error": 2.2762573166180713e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_A",
+            "unit": "p.u.",
+            "expected": {
+              "real": 1.1102230246251565e-16,
+              "imag": 0.0
+            },
+            "actual": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "absolute_error": 1.1102230246251565e-16,
+            "allowed_error": 1.0000000000000003e-09,
+            "relative_error": 1.1102230246251564e-07,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_A",
+            "unit": "kA",
+            "expected": {
+              "real": 4.644837406723584e-16,
+              "imag": 0.0
+            },
+            "actual": {
+              "real": 0.0,
+              "imag": 0.0
+            },
+            "absolute_error": 4.644837406723584e-16,
+            "allowed_error": 1e-08,
+            "relative_error": 4.644837406723584e-08,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_B",
+            "unit": "p.u.",
+            "expected": {
+              "real": -3.248248769697965,
+              "imag": -0.135923563443753
+            },
+            "actual": {
+              "real": -3.248248769697965,
+              "imag": -0.13592356344375356
+            },
+            "absolute_error": 5.551115123125783e-16,
+            "allowed_error": 4.25109139904488e-09,
+            "relative_error": 1.7074620309833843e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_B",
+            "unit": "kA",
+            "expected": {
+              "real": -13.589690591159354,
+              "imag": -0.5686630865468404
+            },
+            "actual": {
+              "real": -13.589690591159354,
+              "imag": -0.5686630865468426
+            },
+            "absolute_error": 2.220446049250313e-15,
+            "allowed_error": 2.3601583292743756e-08,
+            "relative_error": 1.6324908662911975e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_C",
+            "unit": "p.u.",
+            "expected": {
+              "real": 2.5886657448018724,
+              "imag": 2.0268425301709865
+            },
+            "actual": {
+              "real": 2.5886657448018724,
+              "imag": 2.0268425301709865
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 4.287747098001999e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "phase_current_C",
+            "unit": "kA",
+            "expected": {
+              "real": 10.83019467103858,
+              "imag": 8.479696234776819
+            },
+            "actual": {
+              "real": 10.83019467103858,
+              "imag": 8.479696234776819
+            },
+            "absolute_error": 0.0,
+            "allowed_error": 2.3754939652600465e-08,
+            "relative_error": 0.0,
+            "status": "pass"
+          },
+          {
+            "quantity": "ground_current",
+            "unit": "p.u.",
+            "expected": {
+              "real": -0.6595830248960927,
+              "imag": 1.8909189667272326
+            },
+            "actual": {
+              "real": -0.6595830248960928,
+              "imag": 1.890918966727233
+            },
+            "absolute_error": 4.577566798522237e-16,
+            "allowed_error": 3.0026543150179127e-09,
+            "relative_error": 2.285749849185177e-16,
+            "status": "pass"
+          },
+          {
+            "quantity": "base_current",
+            "unit": "kA",
+            "expected": 4.183697602823375,
+            "actual": 4.183697602823375,
+            "absolute_error": 0.0,
+            "allowed_error": 4.283697602823375e-09,
+            "relative_error": 0.0,
+            "status": "pass"
+          }
+        ]
+      }
+    ]
+  },
+  "electrical_audits": [
+    {
+      "case_id": "REF-3PH-001",
+      "passed": true,
+      "checks": [
+        {
+          "check_id": "BASE-CURRENT",
+          "description": "Ibase = Sbase / (sqrt(3) VLL,base)",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "PHASE-CURRENT-BASE",
+          "description": "Phase-current conversion from p.u. to kA",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "PHASE-VOLTAGE-BASE",
+          "description": "Phase-neutral voltage conversion from p.u. to kV",
+          "passed": true,
+          "residual": 2.482534153247273e-16,
+          "tolerance": 1e-09,
+          "unit": "kV"
+        },
+        {
+          "check_id": "SEQUENCE-PHASE-CONSISTENCY",
+          "description": "Symmetrical-component to A-B-C current transform",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        },
+        {
+          "check_id": "GROUND-CURRENT",
+          "description": "Ig = 3 I0",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        },
+        {
+          "check_id": "GROUND-CURRENT-BASE",
+          "description": "Ground-current p.u. to kA conversion",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "BC-THREE-PHASE",
+          "description": "Balanced three-phase current and zero I0/I2",
+          "passed": true,
+          "residual": 2.673771110915334e-15,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        }
+      ]
+    },
+    {
+      "case_id": "REF-SLG-001",
+      "passed": true,
+      "checks": [
+        {
+          "check_id": "BASE-CURRENT",
+          "description": "Ibase = Sbase / (sqrt(3) VLL,base)",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "PHASE-CURRENT-BASE",
+          "description": "Phase-current conversion from p.u. to kA",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "PHASE-VOLTAGE-BASE",
+          "description": "Phase-neutral voltage conversion from p.u. to kV",
+          "passed": true,
+          "residual": 8.881784197001252e-16,
+          "tolerance": 1e-09,
+          "unit": "kV"
+        },
+        {
+          "check_id": "SEQUENCE-PHASE-CONSISTENCY",
+          "description": "Symmetrical-component to A-B-C current transform",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        },
+        {
+          "check_id": "GROUND-CURRENT",
+          "description": "Ig = 3 I0",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        },
+        {
+          "check_id": "GROUND-CURRENT-BASE",
+          "description": "Ground-current p.u. to kA conversion",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "BC-SLG",
+          "description": "A-G fault: Ib = Ic = 0",
+          "passed": true,
+          "residual": 2.482534153247273e-16,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        }
+      ]
+    },
+    {
+      "case_id": "REF-LL-001",
+      "passed": true,
+      "checks": [
+        {
+          "check_id": "BASE-CURRENT",
+          "description": "Ibase = Sbase / (sqrt(3) VLL,base)",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "PHASE-CURRENT-BASE",
+          "description": "Phase-current conversion from p.u. to kA",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "PHASE-VOLTAGE-BASE",
+          "description": "Phase-neutral voltage conversion from p.u. to kV",
+          "passed": true,
+          "residual": 1.1102230246251565e-16,
+          "tolerance": 1e-09,
+          "unit": "kV"
+        },
+        {
+          "check_id": "SEQUENCE-PHASE-CONSISTENCY",
+          "description": "Symmetrical-component to A-B-C current transform",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        },
+        {
+          "check_id": "GROUND-CURRENT",
+          "description": "Ig = 3 I0",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        },
+        {
+          "check_id": "GROUND-CURRENT-BASE",
+          "description": "Ground-current p.u. to kA conversion",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "BC-LL",
+          "description": "B-C fault: Ia = 0, Ib = -Ic, I0 = 0",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        }
+      ]
+    },
+    {
+      "case_id": "REF-DLG-001",
+      "passed": true,
+      "checks": [
+        {
+          "check_id": "BASE-CURRENT",
+          "description": "Ibase = Sbase / (sqrt(3) VLL,base)",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "PHASE-CURRENT-BASE",
+          "description": "Phase-current conversion from p.u. to kA",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "PHASE-VOLTAGE-BASE",
+          "description": "Phase-neutral voltage conversion from p.u. to kV",
+          "passed": true,
+          "residual": 1.1102230246251565e-16,
+          "tolerance": 1e-09,
+          "unit": "kV"
+        },
+        {
+          "check_id": "SEQUENCE-PHASE-CONSISTENCY",
+          "description": "Symmetrical-component to A-B-C current transform",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        },
+        {
+          "check_id": "GROUND-CURRENT",
+          "description": "Ig = 3 I0",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        },
+        {
+          "check_id": "GROUND-CURRENT-BASE",
+          "description": "Ground-current p.u. to kA conversion",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "kA"
+        },
+        {
+          "check_id": "BC-DLG-CURRENT",
+          "description": "B-C-G fault: Ia = 0",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        },
+        {
+          "check_id": "BC-DLG-VOLTAGE",
+          "description": "B-C-G fault: Vb = Vc",
+          "passed": true,
+          "residual": 2.7755575615628914e-16,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        },
+        {
+          "check_id": "BC-DLG-GROUND",
+          "description": "B-C-G fault: Ig = Ib + Ic",
+          "passed": true,
+          "residual": 0.0,
+          "tolerance": 1e-09,
+          "unit": "p.u."
+        }
+      ]
+    }
+  ],
+  "sensitivity": {
+    "parameter_name": "positive-sequence Thevenin impedance scale",
+    "passed": true,
+    "monotonic_magnitude": true,
+    "converged": true,
+    "derivative_relative_difference": 4.4807532073381883e-07,
+    "points": [
+      {
+        "parameter_scale": 0.9,
+        "response": {
+          "real": 1.1632037717230415,
+          "imag": -3.1719203991009257
+        },
+        "response_magnitude": 3.3784792485352466,
+        "relative_change": 0.08376742605645895
+      },
+      {
+        "parameter_scale": 0.95,
+        "response": {
+          "real": 1.1158022322104948,
+          "imag": -3.04464420988839
+        },
+        "response_magnitude": 3.2426644886902536,
+        "relative_change": 0.04020000951497813
+      },
+      {
+        "parameter_scale": 1.0,
+        "response": {
+          "real": 1.0721120186697783,
+          "imag": -2.927187864644107
+        },
+        "response_magnitude": 3.1173471053920054,
+        "relative_change": 0.0
+      },
+      {
+        "parameter_scale": 1.05,
+        "response": {
+          "real": 1.0317137541643229,
+          "imag": -2.818457145329468
+        },
+        "response_magnitude": 3.001355352268467,
+        "relative_change": -0.037208481828318075
+      },
+      {
+        "parameter_scale": 1.1,
+        "response": {
+          "real": 0.9942489442992156,
+          "imag": -2.7175145787251154
+        },
+        "response_magnitude": 2.8936856167910925,
+        "relative_change": -0.07174738039727777
+      }
+    ]
+  },
+  "external_tool_comparison": {
+    "status": "not_performed",
+    "reason": "No ETAP/DIgSILENT/PSS/E result file was supplied; use --external-reference."
+  },
+  "iterative_convergence": {
+    "status": "not_applicable_to_current_solver",
+    "reason": "The validated bus-fault path uses direct sparse linear solves, not an iterative nonlinear load-flow loop. Closed-form reference comparisons and perturbation sensitivity checks are reported instead."
+  },
+  "passed": true
+}

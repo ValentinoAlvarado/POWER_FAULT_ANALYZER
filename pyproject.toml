@@ -54,6 +54,7 @@ api = [
 
 [project.scripts]
 pfa-validate = "power_fault_analyzer.validation.cli:main"
+pfa = "power_fault_analyzer.interfaces.cli.main:main"
 pfa-desktop = "power_fault_analyzer.interfaces.desktop.app:main"
 
 [tool.setuptools.packages.find]

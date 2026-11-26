@@ -1,4 +1,0 @@
-APP-REBOOT-005.1 F821 HOTFIX
-Changed files: 1
-f441aee0ff5933aeb3a5acaddc232a8772b4cd61eb9ebb7c7205d0fc44592c0f  src/power_fault_analyzer/interfaces/desktop/workbench/workbench_window.py
-Scope: add missing QHBoxLayout import only.

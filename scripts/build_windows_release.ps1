@@ -172,8 +172,15 @@ if (-not $makensis) {
 }
 if (-not $makensis) { throw 'NSIS compiler not found. Install NSIS 3.x before building the setup executable.' }
 $setupPath = Join-Path $releaseDirectory 'PFA-Setup-x64.exe'
+$appLicensePath = Join-Path $appFolder 'LICENSE'
+if (-not (Test-Path -LiteralPath $appLicensePath -PathType Leaf)) {
+    throw "Packaged GPL license is missing before NSIS compilation: $appLicensePath"
+}
 Invoke-Checked 'Compile NSIS Windows installer' {
-    & $makensis "/DAPP_VERSION=$displayVersion" "/DAPP_VERSION_RESOURCE=$versionResource" "/DAPP_SOURCE=dist\POWER_FAULT_ANALYZER" "/DOUTPUT_PATH=dist\release\PFA-Setup-x64.exe" (Join-Path $RepositoryRoot 'installer/PFA-Setup-x64.nsi')
+    # NSIS resolves compile-time input paths independently of PowerShell's
+    # current directory. Pass absolute paths so LicenseData and File /r use
+    # the exact staged application directory on every runner.
+    & $makensis "/DAPP_VERSION=$displayVersion" "/DAPP_VERSION_RESOURCE=$versionResource" "/DAPP_SOURCE=$appFolder" "/DOUTPUT_PATH=$setupPath" (Join-Path $RepositoryRoot 'installer/PFA-Setup-x64.nsi')
 }
 if (-not (Test-Path $setupPath)) { throw 'NSIS did not create PFA-Setup-x64.exe.' }
 

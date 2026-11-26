@@ -3038,7 +3038,7 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
 
 
 _LIGHT_WORKBENCH_STYLESHEET = """
-QMainWindow, QWidget { color: #1D2939; font-family: "Segoe UI"; font-size: 9pt; }
+QMainWindow, QWidget { color: #1D2939; font-family: "Segoe UI"; font-size: 10pt; }
 QMainWindow { background: #F3F5F8; }
 QMenuBar { background: #FFFFFF; color: #344054; border-bottom: 1px solid #E4E7EC; padding: 3px 8px; }
 QMenuBar::item { padding: 6px 10px; background: transparent; }
@@ -3073,24 +3073,24 @@ QHeaderView::section { background: #F5F7FA; color: #475467; padding: 8px; border
 QStatusBar { background: #FFFFFF; color: #667085; border-top: 1px solid #E4E7EC; }
 QFrame[workbenchPanel="true"] { background: #FFFFFF; border: 1px solid #E4E7EC; }
 QFrame#DiagramDocumentBar { background: #FFFFFF; border: 0; border-bottom: 1px solid #E4E7EC; }
-QLabel#DiagramEyebrow { color: #667085; font-size: 7pt; font-weight: 700; letter-spacing: 1.15px; }
+QLabel#DiagramEyebrow { color: #667085; font-size: 8pt; font-weight: 700; letter-spacing: 1.15px; }
 QLabel#DiagramTitle { color: #172B3A; font-size: 11pt; font-weight: 650; }
-QLabel#DiagramSummary { color: #667085; font-size: 7.5pt; font-weight: 600; }
+QLabel#DiagramSummary { color: #667085; font-size: 8.5pt; font-weight: 600; }
 QToolButton#DiagramToggle { background: #F8FAFC; color: #475467; border: 1px solid #DCE3E9; border-radius: 5px; padding: 6px 11px; }
 QToolButton#DiagramToggle:checked { background: #E7F1F5; color: #15546A; border-color: #9BBBC8; font-weight: 600; }
 QPushButton#DiagramFitButton { padding: 6px 14px; background: #173A57; color: white; border-color: #173A57; font-weight: 600; }
 QLineEdit#ProjectTreeSearch { background: #F8FAFC; }
-QLabel#WorkbenchPanelHeading { color: #475467; font-size: 8pt; font-weight: 700; letter-spacing: 1px; padding: 3px 2px 7px 2px; }
-QLabel#SectionEyebrow { color: #667085; font-size: 8pt; font-weight: 700; letter-spacing: 1px; }
-QLabel#CanvasWelcomeEyebrow { color: #1D6A83; font-size: 8pt; font-weight: 700; letter-spacing: 1.2px; }
+QLabel#WorkbenchPanelHeading { color: #475467; font-size: 9pt; font-weight: 700; letter-spacing: 1px; padding: 3px 2px 7px 2px; }
+QLabel#SectionEyebrow { color: #667085; font-size: 9pt; font-weight: 700; letter-spacing: 1px; }
+QLabel#CanvasWelcomeEyebrow { color: #1D6A83; font-size: 9pt; font-weight: 700; letter-spacing: 1.2px; }
 QLabel#CanvasWelcomeTitle { color: #172B3A; font-size: 20pt; font-weight: 600; }
 QLabel#CanvasWelcomeDescription { color: #667085; font-size: 10pt; }
-QLabel#CanvasWelcomeHint { color: #98A2B3; font-size: 8pt; }
+QLabel#CanvasWelcomeHint { color: #98A2B3; font-size: 9pt; }
 QFrame#CanvasWelcomeCard { background: #FFFFFF; border: 1px solid #DCE3E9; border-radius: 12px; }
 QFrame#SymbolPreviewFrame { background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 6px; }
-QLabel#CandidateStatus { background: #FFF7E8; color: #946200; border: 1px solid #F3D49A; border-radius: 4px; padding: 4px 6px; font-size: 7pt; font-weight: 700; }
-QLabel#QETProvenanceDetails { background: #F8FAFC; color: #475467; border: 1px solid #EAECF0; border-radius: 5px; padding: 8px; font-size: 8pt; }
-QLabel#QETLibraryStatus { color: #98A2B3; font-size: 8pt; }
+QLabel#CandidateStatus { background: #FFF7E8; color: #946200; border: 1px solid #F3D49A; border-radius: 4px; padding: 4px 6px; font-size: 8pt; font-weight: 700; }
+QLabel#QETProvenanceDetails { background: #F8FAFC; color: #475467; border: 1px solid #EAECF0; border-radius: 5px; padding: 8px; font-size: 9pt; }
+QLabel#QETLibraryStatus { color: #98A2B3; font-size: 9pt; }
 QToolButton#ProvenanceToggle { color: #475467; text-align: left; padding: 4px 2px; }
 QSplitter::handle { background: #E5EAF0; }
 QSplitter::handle:hover { background: #8AA5B7; }

@@ -30,6 +30,33 @@ jobs:
       - name: Acquire pinned QElectroTech symbol assets
         shell: pwsh
         run: ./scripts/Acquire-QElectroTechSymbolSeed.ps1
+      - name: Install Cairo native runtime
+        uses: msys2/setup-msys2@v2
+        id: cairo
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-cairo
+
+      - name: Configure Cairo DLL discovery
+        shell: pwsh
+        env:
+          MSYS2_LOCATION: ${{ steps.cairo.outputs.msys2-location }}
+        run: |
+          $cairoBin = Join-Path $env:MSYS2_LOCATION "ucrt64\bin"
+          $cairoDll = Join-Path $cairoBin "libcairo-2.dll"
+
+          if (-not (Test-Path -LiteralPath $cairoDll)) {
+              throw "Cairo runtime not found: $cairoDll"
+          }
+
+          "CAIROCFFI_DLL_DIRECTORIES=$cairoBin" |
+              Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          $cairoBin |
+              Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+          Write-Host "Cairo runtime configured: $cairoBin"
       - name: Build, test and package Windows application
         shell: pwsh
         run: ./scripts/build_windows_release.ps1

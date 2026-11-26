@@ -653,6 +653,12 @@ class WorkbenchWindow(QMainWindow):
             action.setIcon(self._awesome_icon(icon, fallback))
             toolbar.addAction(action)
 
+        def add_section_label(title: str) -> None:
+            label = QLabel(title.upper())
+            label.setObjectName("CommandSectionLabel")
+            toolbar.addWidget(label)
+
+        add_section_label("Project")
         self.quick_toolbar = toolbar
         add_existing(self.new_action, "fa5s.file", QStyle.StandardPixmap.SP_FileIcon)
         add_existing(
@@ -660,6 +666,7 @@ class WorkbenchWindow(QMainWindow):
         )
         add_existing(self.save_action, "fa5s.save", QStyle.StandardPixmap.SP_DialogSaveButton)
         toolbar.addSeparator()
+        add_section_label("Network")
         self.model_toolbar = toolbar
         add_command(
             "Bus",
@@ -690,6 +697,7 @@ class WorkbenchWindow(QMainWindow):
             QStyle.StandardPixmap.SP_ArrowRight,
         )
         toolbar.addSeparator()
+        add_section_label("Diagram")
         self.diagram_toolbar = toolbar
         rotate_cw_toolbar = add_command(
             "Rotate ↻",
@@ -708,6 +716,7 @@ class WorkbenchWindow(QMainWindow):
         self.rotate_cw_toolbar_action = rotate_cw_toolbar
         self.rotate_ccw_toolbar_action = rotate_ccw_toolbar
         toolbar.addSeparator()
+        add_section_label("Study & Export")
         self.analysis_toolbar = toolbar
         add_existing(self.run_action, "fa5s.play", QStyle.StandardPixmap.SP_MediaPlay)
         self.export_diagram_action.setText("Export SVG")

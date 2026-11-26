@@ -42,15 +42,15 @@ class WorkbenchPalette:
 
 DARK_PALETTE = WorkbenchPalette(
     key="dark",
-    window="#151C25",
-    panel="#1E2936",
-    panel_elevated="#263442",
-    canvas="#F4F7FA",
+    window="#111922",
+    panel="#192431",
+    panel_elevated="#202E3C",
+    canvas="#F5F7F9",
     border="#354556",
     border_strong="#4A5D70",
     text="#E5EDF4",
     text_muted="#A5B4C3",
-    accent="#35A7C7",
+    accent="#29B6D1",
     accent_hover="#4BBAD8",
     accent_pressed="#247F9A",
     selection="#244B60",
@@ -118,11 +118,12 @@ QMenuBar {
     background: @panel@;
     color: @text@;
     border-bottom: 1px solid @border@;
-    padding: 3px 8px;
+    padding: 1px 6px;
+    min-height: 24px;
 }
 QMenuBar::item {
     background: transparent;
-    padding: 7px 11px;
+    padding: 4px 8px;
     border-radius: 4px;
 }
 QMenuBar::item:selected {
@@ -146,15 +147,17 @@ QToolBar#EngineeringCommandBar {
     background: @panel@;
     border: 0;
     border-bottom: 1px solid @border@;
-    spacing: 5px;
-    padding: 7px 10px;
+    spacing: 3px;
+    padding: 2px 5px;
+    min-height: 32px;
 }
 QToolButton {
     color: @text@;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 5px;
-    padding: 7px 9px;
+    border-radius: 4px;
+    padding: 4px 6px;
+    min-height: 22px;
 }
 QToolButton:hover {
     background: @hover@;
@@ -172,8 +175,22 @@ QToolBar::separator {
 }
 QDockWidget {
     color: @text@;
+    background: @panel@;
     titlebar-close-icon: none;
     titlebar-normal-icon: none;
+}
+QDockWidget > QWidget {
+    background: @panel@;
+}
+QWidget#WorkbenchPanelContent {
+    background: @panel@;
+}
+QWidget#NetworkDesignPage {
+    background: @window@;
+}
+QTabWidget#MainWorkspaceTabs::pane {
+    background: @window@;
+    border: 0;
 }
 QDockWidget::title {
     background: @panel_elevated@;
@@ -204,7 +221,7 @@ QTreeWidget {
     border: 0;
 }
 QTreeWidget::item, QTableWidget::item {
-    padding: 5px 4px;
+    padding: 3px 3px;
     border: 0;
 }
 QTreeWidget::item:hover, QTableWidget::item:hover {
@@ -230,8 +247,8 @@ QTabWidget::pane {
 QTabBar::tab {
     background: @panel_elevated@;
     color: @text_muted@;
-    padding: 10px 15px;
-    margin-right: 2px;
+    padding: 6px 11px;
+    margin-right: 1px;
     border: 0;
     border-bottom: 2px solid transparent;
 }
@@ -296,11 +313,11 @@ QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox {
     background: @input@;
     color: @text@;
     border: 1px solid @input_border@;
-    border-radius: 5px;
-    padding: 7px 9px;
+    border-radius: 4px;
+    padding: 5px 7px;
     selection-background-color: @selection@;
     selection-color: @selection_text@;
-    min-height: 20px;
+    min-height: 18px;
 }
 QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus {
     border: 1px solid @accent@;
@@ -324,6 +341,8 @@ QStatusBar {
     background: @panel@;
     color: @text_muted@;
     border-top: 1px solid @border@;
+    min-height: 19px;
+    padding: 0 4px;
 }
 QProgressBar {
     background: @panel_elevated@;
@@ -367,7 +386,7 @@ QSplitter::handle:hover {
     background: @accent@;
 }
 QSplitter::handle:horizontal {
-    width: 7px;
+    width: 5px;
     margin: 0 1px;
 }
 QSplitter::handle:vertical {

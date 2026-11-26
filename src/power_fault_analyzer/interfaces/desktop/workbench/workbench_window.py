@@ -874,7 +874,34 @@ class WorkbenchWindow(QMainWindow):
         properties_heading = QLabel("SELECTION PROPERTIES")
         properties_heading.setObjectName("SectionEyebrow")
         properties_layout.addWidget(properties_heading)
-        properties_layout.addWidget(self.properties, 1)
+
+        empty_container = QWidget()
+        empty_container.setObjectName("InspectorEmptyContainer")
+        empty_layout = QVBoxLayout(empty_container)
+        empty_layout.setContentsMargins(8, 12, 8, 12)
+        empty_layout.addStretch(1)
+        self.properties_empty_state = QFrame()
+        self.properties_empty_state.setObjectName("InspectorEmptyState")
+        empty_card_layout = QVBoxLayout(self.properties_empty_state)
+        empty_card_layout.setContentsMargins(16, 16, 16, 16)
+        empty_card_layout.setSpacing(8)
+        empty_eyebrow = QLabel("SELECTION REQUIRED")
+        empty_eyebrow.setObjectName("InspectorEmptyEyebrow")
+        empty_title = QLabel("No element selected")
+        empty_title.setObjectName("InspectorEmptyTitle")
+        empty_description = QLabel(
+            "Select a busbar, branch or equipment item in the diagram or project tree "
+            "to inspect its electrical data, connectivity and drawing properties."
+        )
+        empty_description.setObjectName("InspectorEmptyDescription")
+        empty_description.setWordWrap(True)
+        empty_card_layout.addWidget(empty_eyebrow)
+        empty_card_layout.addWidget(empty_title)
+        empty_card_layout.addWidget(empty_description)
+        empty_layout.addWidget(self.properties_empty_state)
+        empty_layout.addStretch(1)
+        properties_layout.addWidget(empty_container, 1)
+        self.properties.hide()
 
         self.property_editor_widget = QWidget()
         self.property_editor_widget.setObjectName("TransactionalPropertyEditor")
@@ -2512,6 +2539,8 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
         except (KeyError, ValueError, TypeError) as exc:
             self._log(f"Properties inspector could not resolve selection: {exc}")
             return
+        self.properties_empty_state.hide()
+        self.properties.show()
         self.properties.clear()
         for name, value in rows:
             self.properties.addTopLevelItem(QTreeWidgetItem([name, value]))
@@ -3031,7 +3060,9 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
         if hasattr(self, "switch_state_button"):
             self.switch_state_button.hide()
         self.properties.clear()
-        self.properties.addTopLevelItem(QTreeWidgetItem(["Selection", "Select a network element."]))
+        self.properties.hide()
+        if hasattr(self, "properties_empty_state"):
+            self.properties_empty_state.show()
 
     # ------------------------------------------------------------------- helpers
     def _mark_dirty(self, *_args) -> None:

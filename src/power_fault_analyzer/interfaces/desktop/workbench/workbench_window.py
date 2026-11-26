@@ -1245,6 +1245,9 @@ class WorkbenchWindow(QMainWindow):
         except KeyError as exc:
             QMessageBox.warning(self, "Insert Source Symbol", str(exc))
             return
+        # An explicit insert request must reveal the drawing-only layer first.
+        # Qt does not allow an invisible QGraphicsItem to become selected.
+        self.show_source_candidates_action.setChecked(True)
         center = self.canvas.mapToScene(self.canvas.viewport().rect().center())
         # A source symbol is positioned by its declared hotspot, not by a guessed
         # top-left corner. This keeps the electrical reference point under the cursor.

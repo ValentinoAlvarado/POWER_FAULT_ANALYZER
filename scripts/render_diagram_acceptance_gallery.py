@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Make repository-root helper packages (for example ``examples``) importable
+# when this file is executed by path from any working directory.
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
+
 import argparse
 import json
 import os
-from pathlib import Path
 from uuid import uuid4
 
 from examples.canonical_model_scenarios import (

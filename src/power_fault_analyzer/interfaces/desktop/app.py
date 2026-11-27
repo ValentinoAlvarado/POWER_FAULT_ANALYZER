@@ -6,6 +6,13 @@ import sys
 
 
 def main() -> int:
+    # PyInstaller launches this same executable for the isolated automation
+    # worker. Dispatch before importing Qt or constructing QApplication.
+    if len(sys.argv) >= 4 and sys.argv[1] == "--pfa-script-worker":
+        from power_fault_analyzer.scripting.worker import main as worker_main
+
+        return worker_main(sys.argv[2], sys.argv[3])
+
     try:
         from PySide6.QtWidgets import QApplication, QStyleFactory
     except ImportError as exc:
@@ -18,7 +25,6 @@ def main() -> int:
     from power_fault_analyzer.interfaces.desktop.workbench.workbench_window import WorkbenchWindow
 
     application = QApplication(sys.argv)
-    # Fusion keeps widget metrics and rendering consistent across Windows themes.
     fusion_style = QStyleFactory.create("Fusion")
     if fusion_style is not None:
         application.setStyle(fusion_style)
@@ -26,8 +32,6 @@ def main() -> int:
     application.setOrganizationName("POWER_FAULT_ANALYZER")
     application.setApplicationDisplayName("POWER_FAULT_ANALYZER — Engineering Workbench")
     window = WorkbenchWindow(build_workbench_services())
-    # Engineering drawings benefit from the full available viewport by default.
-    # The window still remains resizable and persists its splitter layout.
     window.showMaximized()
     return application.exec()
 

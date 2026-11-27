@@ -12,8 +12,12 @@ from examples.canonical_model_scenarios import (
     build_single_bus_substation,
 )
 from power_fault_analyzer.application.use_cases.network_workspace import NetworkWorkspace
-from power_fault_analyzer.application.use_cases.reference_network_template import BuildReferenceNetworkTemplate
-from power_fault_analyzer.application.use_cases.substation_engineering import BuildPFAES001Substation
+from power_fault_analyzer.application.use_cases.reference_network_template import (
+    BuildReferenceNetworkTemplate,
+)
+from power_fault_analyzer.application.use_cases.substation_engineering import (
+    BuildPFAES001Substation,
+)
 from power_fault_analyzer.diagram.model_document_export import (
     export_engineering_png,
     export_engineering_svg,

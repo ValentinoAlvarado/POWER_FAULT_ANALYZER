@@ -72,7 +72,8 @@ def execute_request(request: dict) -> dict:
     }
     captured = io.StringIO()
     with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
-        exec(
+        # S102 is intentional: automation source is checked by validate_script_policy above.
+        exec(  # noqa: S102
             compile(source, "<PFA Code & Automation Worker>", "exec"),
             namespace,
             namespace,

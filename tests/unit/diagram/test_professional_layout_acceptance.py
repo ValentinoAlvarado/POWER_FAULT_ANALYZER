@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from itertools import pairwise
 from uuid import uuid4
 
 from examples.canonical_model_scenarios import build_multibus_network
 from power_fault_analyzer.application.use_cases.network_workspace import NetworkWorkspace
-from power_fault_analyzer.application.use_cases.reference_network_template import BuildReferenceNetworkTemplate
-from power_fault_analyzer.application.use_cases.substation_engineering import BuildPFAES001Substation
+from power_fault_analyzer.application.use_cases.reference_network_template import (
+    BuildReferenceNetworkTemplate,
+)
+from power_fault_analyzer.application.use_cases.substation_engineering import (
+    BuildPFAES001Substation,
+)
 from power_fault_analyzer.diagram.model_document_export import render_engineering_svg
 from power_fault_analyzer.diagram.model_projection import (
     project_network_to_diagram,
@@ -19,7 +24,9 @@ from power_fault_analyzer.domain.enums.equipment_family import EquipmentFamily
 from power_fault_analyzer.domain.enums.equipment_interface import ParameterEvidenceStatus
 from power_fault_analyzer.domain.enums.switching_device import SwitchingDeviceKind, SwitchPosition
 from power_fault_analyzer.domain.value_objects.voltage import Voltage
-from power_fault_analyzer.equipment.interfaces.unresolved_branch import UnresolvedTwoTerminalEquipment
+from power_fault_analyzer.equipment.interfaces.unresolved_branch import (
+    UnresolvedTwoTerminalEquipment,
+)
 from power_fault_analyzer.equipment.interfaces.unresolved_equipment import EngineeringParameter
 from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import (
     UnresolvedSingleTerminalEquipment,
@@ -152,7 +159,7 @@ def test_auto_layout_allocates_three_feeder_bays_without_losing_connections():
     assert len(lines) == 3
     assert all(abs(item.orientation_deg) == 90.0 for item in lines)
     lane_centers = sorted(item.center.x for item in lines)
-    assert all(right - left >= 200.0 for left, right in zip(lane_centers, lane_centers[1:]))
+    assert all(right - left >= 200.0 for left, right in pairwise(lane_centers))
     assert document.connection_pairs == frozenset(
         (item.terminal_id, item.bus_id) for item in workspace.network.connections
     )

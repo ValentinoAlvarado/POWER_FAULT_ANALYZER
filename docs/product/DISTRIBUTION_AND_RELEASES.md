@@ -34,6 +34,27 @@ The offscreen acceptance exercises selected workbench layout, drawing-symbol pre
 
 A configured workflow is not proof of a successful build. A workflow artifact is not yet a public release. The build must complete successfully, the downloaded ZIP and sidecars must be inspected, and the executable must be extracted and exercised on a clean Windows x64 environment before the product is described as release-accepted. Retain the run URL, artifact identity, SHA-256 values and acceptance record.
 
+## Portable update without reinstalling
+
+The portable updater is an external PowerShell script. It does not run inside the GUI. Download these three files from the same successful workflow artifact:
+
+- `PFA-Windows-x64.zip`
+- `SHA256SUMS.txt`
+- `Update-PFA-Portable.ps1`
+
+Close PFA before updating. Verify that project files are stored outside the application directory. Run the updater from PowerShell 5.1 or later:
+
+```powershell
+& .\Update-PFA-Portable.ps1 `
+    -ZipPath "C:\Downloads\PFA-Windows-x64.zip" `
+    -ChecksumPath "C:\Downloads\SHA256SUMS.txt" `
+    -InstallDirectory "C:\PFA_ACCEPTANCE_RUN18\application"
+```
+
+The updater checks the ZIP SHA-256 against the downloaded manifest before touching the current installation. It stages and inspects the onedir package, checks product/architecture/build metadata, detects a running executable, retains the previous application in a uniquely named backup directory, and attempts rollback if promotion fails. It writes an update record beside the installation. Do not delete the backup until the updated executable and representative project workflows have been accepted.
+
+Qt workbench geometry, panel state and theme are persisted separately through `QSettings`; the replacement script does not modify those preferences. Project documents should remain in a user-owned location such as `Documents\POWER_FAULT_ANALYZER\Projects\`, never inside the portable application directory.
+
 ## Public download page
 
 The website reads the repository's latest GitHub Release and activates the Windows download link only when that release contains `PFA-Windows-x64.zip`. In the absence of such a release, it displays that no verified release is available. The website does not itself build, sign or validate the executable.

@@ -1,0 +1,139 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string]$UpdaterScript,
+    [Parameter(Mandatory = $true)][string]$ZipPath,
+    [Parameter(Mandatory = $true)][string]$ChecksumPath
+)
+
+$ErrorActionPreference = 'Stop'
+$updater = (Resolve-Path -LiteralPath $UpdaterScript -ErrorAction Stop).Path
+$zip = (Resolve-Path -LiteralPath $ZipPath -ErrorAction Stop).Path
+$checksum = (Resolve-Path -LiteralPath $ChecksumPath -ErrorAction Stop).Path
+$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("PFA portable updater acceptance-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $testRoot | Out-Null
+
+function New-TestInstall {
+    param([string]$Directory, [string]$Version)
+    New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $Directory 'POWER_FAULT_ANALYZER.exe') -Value "old-$Version" -Encoding ASCII
+    $metadata = [ordered]@{
+        product = 'POWER_FAULT_ANALYZER'
+        version = $Version
+        architecture = 'x64'
+        git_commit = ('b' * 40)
+    }
+    $metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $Directory 'BUILD-INFO.json') -Encoding UTF8
+}
+
+try {
+    # A checksum mismatch must fail before the existing installation is moved.
+    $badRoot = Join-Path $testRoot 'checksum failure'
+    $badInstall = Join-Path $badRoot 'application'
+    New-Item -ItemType Directory -Path $badRoot | Out-Null
+    New-TestInstall -Directory $badInstall -Version 'old-checksum-test'
+    $badManifest = Join-Path $badRoot 'SHA256SUMS.txt'
+    ('{0}  PFA-Windows-x64.zip' -f ('0' * 64)) |
+        Set-Content -LiteralPath $badManifest -Encoding ASCII
+    $hashRejected = $false
+    try {
+        & $updater -ZipPath $zip -ChecksumPath $badManifest -InstallDirectory $badInstall
+    }
+    catch {
+        if ($_.Exception.Message -like '*SHA-256 mismatch*') {
+            $hashRejected = $true
+        }
+        else {
+            throw
+        }
+    }
+    if (-not $hashRejected) { throw 'Checksum mismatch was not rejected.' }
+    if ((Get-Content -LiteralPath (Join-Path $badInstall 'POWER_FAULT_ANALYZER.exe') -Raw).Trim() -ne 'old-old-checksum-test') {
+        throw 'Checksum rejection modified the existing installation.'
+    }
+
+    # A normal promotion must retain the old application and outside user data.
+    $successRoot = Join-Path $testRoot 'successful update'
+    $successInstall = Join-Path $successRoot 'application'
+    New-Item -ItemType Directory -Path $successRoot | Out-Null
+    New-TestInstall -Directory $successInstall -Version 'old-success-test'
+    $projectDirectory = Join-Path $testRoot 'User Documents\POWER_FAULT_ANALYZER\Projects'
+    New-Item -ItemType Directory -Path $projectDirectory -Force | Out-Null
+    $projectPath = Join-Path $projectDirectory 'Keep.json'
+    Set-Content -LiteralPath $projectPath -Value '{"project":"preserve"}' -Encoding UTF8
+
+    & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $successInstall
+    $newInfo = Get-Content -LiteralPath (Join-Path $successInstall 'BUILD-INFO.json') -Raw | ConvertFrom-Json
+    if ($newInfo.product -ne 'POWER_FAULT_ANALYZER' -or $newInfo.architecture -ne 'x64') {
+        throw 'Successful update did not install the expected PFA build.'
+    }
+    $successBackup = Get-ChildItem -LiteralPath $successRoot -Directory |
+        Where-Object { $_.Name -like 'application.backup-*' } |
+        Select-Object -First 1
+    if (-not $successBackup) { throw 'Successful update did not retain the previous application backup.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $successBackup.FullName 'POWER_FAULT_ANALYZER.exe'))) {
+        throw 'Previous application backup is incomplete.'
+    }
+    if (-not (Test-Path -LiteralPath $projectPath -PathType Leaf)) {
+        throw 'Update changed a project stored outside the application directory.'
+    }
+
+    # Inject failure on the staging-to-install rename. The third move is rollback.
+    $rollbackRoot = Join-Path $testRoot 'rollback update'
+    $rollbackInstall = Join-Path $rollbackRoot 'application'
+    New-Item -ItemType Directory -Path $rollbackRoot | Out-Null
+    New-TestInstall -Directory $rollbackInstall -Version 'old-rollback-test'
+    $global:PFA_UpdaterMoveCallCount = 0
+    function global:Move-Item {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)][string]$LiteralPath,
+            [Parameter(Mandatory = $true)][string]$Destination,
+            [switch]$Force
+        )
+        $global:PFA_UpdaterMoveCallCount++
+        if ($global:PFA_UpdaterMoveCallCount -eq 2) {
+            throw 'Simulated promotion failure for rollback acceptance.'
+        }
+        Microsoft.PowerShell.Management\Move-Item @PSBoundParameters
+    }
+
+    $rollbackObserved = $false
+    try {
+        & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $rollbackInstall
+    }
+    catch {
+        if ($_.Exception.Message -like '*Simulated promotion failure for rollback acceptance*') {
+            $rollbackObserved = $true
+        }
+        else {
+            throw
+        }
+    }
+    finally {
+        Remove-Item Function:\global:Move-Item -ErrorAction SilentlyContinue
+        Remove-Variable PFA_UpdaterMoveCallCount -Scope Global -ErrorAction SilentlyContinue
+    }
+    if (-not $rollbackObserved) {
+        throw 'Injected promotion failure did not reach the rollback path.'
+    }
+    $restoredInfo = Get-Content -LiteralPath (Join-Path $rollbackInstall 'BUILD-INFO.json') -Raw | ConvertFrom-Json
+    if ($restoredInfo.version -ne 'old-rollback-test') {
+        throw 'Rollback did not restore the original application version.'
+    }
+    $restoredExe = Get-Content -LiteralPath (Join-Path $rollbackInstall 'POWER_FAULT_ANALYZER.exe') -Raw
+    if ($restoredExe.Trim() -ne 'old-old-rollback-test') {
+        throw 'Rollback did not restore the original executable.'
+    }
+
+    Write-Host 'PASS updater rejected checksum mismatch without modifying the installation.' -ForegroundColor Green
+    Write-Host 'PASS updater promoted the new package and retained the previous application.' -ForegroundColor Green
+    Write-Host 'PASS injected promotion failure restored the original application.' -ForegroundColor Green
+    Write-Host 'PASS project documents outside the application directory remained intact.' -ForegroundColor Green
+}
+finally {
+    Remove-Item Function:\global:Move-Item -ErrorAction SilentlyContinue
+    Remove-Variable PFA_UpdaterMoveCallCount -Scope Global -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $testRoot) {
+        Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}

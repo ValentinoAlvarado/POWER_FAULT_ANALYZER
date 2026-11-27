@@ -393,9 +393,12 @@ def _estimated_label_width(text: str, size_pt: float = 9.0) -> float:
 
 
 def _automatic_equipment_layout(
-    network: Network, buses: dict[UUID, EngineeringBus],
+    network: Network,
+    buses: dict[UUID, EngineeringBus],
+    display_labels: dict[UUID, str] | None = None,
 ) -> dict[UUID, tuple[Point, float]]:
     """Allocate two-terminal equipment to non-overlapping topology-derived bay lanes."""
+    display_labels = display_labels or {}
     vertical_requests: list[BayLaneRequest] = []
     horizontal_requests: list[BayLaneRequest] = []
     metadata: dict[str, tuple[UUID, float, float, float, float, float]] = {}
@@ -412,7 +415,7 @@ def _automatic_equipment_layout(
         second = buses[second_bus_id]
         family, _state = _equipment_family(equipment)
         definition = get_symbol_definition(family)
-        label_width = _estimated_label_width(equipment.name)
+        label_width = _estimated_label_width(display_labels.get(equipment.id, equipment.name))
         same_level = abs(second.center.y - first.center.y) < 1e-6
         request_id = str(equipment.id)
         if same_level:
@@ -423,7 +426,7 @@ def _automatic_equipment_layout(
                 right += 60.0
             start, end = left, right
             preferred = max(first.center.y, second.center.y) + 190.0
-            width = max(definition.height + 32.0, 76.0)
+            width = max(definition.width + 32.0, label_width + 24.0)
             horizontal_requests.append(BayLaneRequest(request_id, start, end, preferred, width))
             metadata[request_id] = (equipment.id, (first.center.x + second.center.x) / 2.0,
                                     (first.center.y + second.center.y) / 2.0, 0.0,
@@ -941,7 +944,25 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
         item.equipment_id: item for item in workspace.diagram_symbols.values()
         if item.equipment_id is not None
     }
-    automatic_equipment_layout = _automatic_equipment_layout(network, bus_by_identifier)
+    persisted_labels_by_id = {
+        item.label_id: item for item in workspace.diagram_labels.values()
+    }
+    display_labels: dict[UUID, str] = {}
+    for equipment in network.equipment:
+        label_id = uuid5(
+            NAMESPACE_URL,
+            f"urn:pfa:diagram-label:{equipment.id}:equipment-name",
+        )
+        persisted_label = persisted_labels_by_id.get(label_id)
+        placement = placements_by_equipment.get(equipment.id)
+        display_labels[equipment.id] = (
+            persisted_label.text if persisted_label is not None
+            else placement.label if placement is not None and placement.label
+            else equipment.name
+        )
+    automatic_equipment_layout = _automatic_equipment_layout(
+        network, bus_by_identifier, display_labels
+    )
     preferred_equipment_positions = {
         identifier: value[0] for identifier, value in automatic_equipment_layout.items()
     }

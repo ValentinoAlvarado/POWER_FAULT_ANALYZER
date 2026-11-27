@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from itertools import pairwise
-from math import ceil, cos, hypot, radians, sin
+from math import cos, hypot, radians, sin
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from power_fault_analyzer.application.use_cases.network_workspace import (
@@ -37,6 +37,7 @@ from power_fault_analyzer.equipment.transmission.line import Line
 
 from .layout import Point, Rect, perpendicular_bay_route, snap_point
 from .symbol_catalog import get_symbol_definition
+from .topology_layout import BayLaneRequest, layout_bay_lanes
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +66,7 @@ class EngineeringBus:
     center: Point
     orientation_deg: float = 0.0
     layer: str = "conductors"
+    kind: str = "busbar"
 
     @property
     def length(self) -> float:
@@ -269,103 +271,153 @@ def _path_order(network: Network, adjacency: dict[UUID, set[UUID]], shunts: dict
 
 
 def _busbar_length(terminal_count: int) -> float:
-    """Size a finite busbar from its explicit connected-terminal incidence.
-
-    Graph degree alone is insufficient: a source shunt and a line terminal both
-    occupy real bays on the same bus even when the bus has only one neighbour.
-    The minimum length prevents one-bay buses from collapsing into short stubs;
-    each additional canonical terminal receives a fixed bay allowance.
-    """
+    """Size a busbar from its explicit terminal incidence and bay count."""
     if terminal_count < 0:
         raise ValueError("terminal_count cannot be negative")
-    return min(
-        _BUS_MAX_LENGTH,
-        _BUS_MIN_LENGTH + max(0, terminal_count - 1) * _BUS_LENGTH_PER_EXTRA_TERMINAL,
-    )
+    return 220.0 + max(0, terminal_count - 1) * 110.0
 
 
 def _automatic_bus_layout(network: Network, grid: float):
-    """Place every busbar on its own row so bays enter/leave it perpendicularly.
+    """Arrange explicit bus connectivity as a deterministic, spacious tree layout.
 
-    A previous two-row serpentine placed adjacent buses at the same Y coordinate.
-    The equipment between those buses was consequently drawn inline with the
-    busbars, visually turning distinct electrical nodes into one continuous bar.
-    The current layout gives every bus a unique row and lets two-terminal bay
-    equipment run vertically between rows.  X alternates to keep path networks
-    compact without making a branch collinear with a busbar.
+    The spanning forest is built only from terminal-to-bus connection records.
+    Every bus receives a unique level; siblings are centered beneath their parent
+    using subtree widths. Non-tree electrical links remain in the model and are
+    routed as additional edges without changing the connectivity graph.
     """
     adjacency, _equipment_by_pair, shunts = _topology(network)
     terminal_counts: dict[UUID, int] = {bus.id: 0 for bus in network.buses}
     for connection in network.connections:
         terminal_counts[connection.bus_id] = terminal_counts.get(connection.bus_id, 0) + 1
+    bus_order = {bus.id: index for index, bus in enumerate(network.buses)}
+    source_priority = _source_priority(network, shunts)
+    roots = sorted(network.buses, key=lambda bus: (source_priority.get(bus.id, 9), bus_order[bus.id]))
+    parents: dict[UUID, UUID | None] = {}
+    children: dict[UUID, list[UUID]] = defaultdict(list)
+    depth: dict[UUID, int] = {}
+    component_roots: list[UUID] = []
+    for root in roots:
+        if root.id in depth:
+            continue
+        component_roots.append(root.id)
+        depth[root.id] = 0
+        parents[root.id] = None
+        queue = deque([root.id])
+        while queue:
+            current = queue.popleft()
+            for neighbor in sorted(adjacency[current], key=lambda item: bus_order[item]):
+                if neighbor in depth:
+                    continue
+                depth[neighbor] = depth[current] + 1
+                parents[neighbor] = current
+                children[current].append(neighbor)
+                queue.append(neighbor)
+
+    subtree_widths: dict[UUID, float] = {}
+    branch_gap = 320.0
+    minimum_subtree_width = 260.0
+
+    def subtree_width(identifier: UUID) -> float:
+        if identifier in subtree_widths:
+            return subtree_widths[identifier]
+        child_widths = [subtree_width(item) for item in children[identifier]]
+        width = max(minimum_subtree_width, sum(child_widths) + branch_gap * max(0, len(child_widths) - 1))
+        subtree_widths[identifier] = width
+        return width
 
     positions: dict[UUID, Point] = {}
     orientations: dict[UUID, float] = {}
     lengths: dict[UUID, float] = {}
-    ordered_path = _path_order(network, adjacency, shunts)
-    # Keep adjacent automatic bus rows close enough to share a wide physical
-    # bay corridor.  This is what permits terminal taps on connected bars to
-    # align on one vertical lane instead of forcing long lateral dog-legs.
-    x_left, x_right = 360.0, 420.0
-    # Compact composition: keep the row pitch aligned to the workspace grid.
-    # Bus centers are snapped independently below; a 144-unit pitch on the
-    # default 20-unit grid produced alternating 140/160-unit gaps. 140 is the
-    # nearest compact grid pitch that preserves 36 units of lead on each side
-    # of the largest 68-unit two-terminal symbol. Coarser grids round upward.
-    y_top = 220.0
-    row_spacing = max(140.0, ceil(140.0 / grid) * grid)
+    cursor_x = 520.0
+    top_y = 240.0
+    level_pitch = 380.0
 
-    if ordered_path is not None:
-        for index, bus_id in enumerate(ordered_path):
-            x = x_left if index % 2 == 0 else x_right
-            y = y_top + index * row_spacing
-            positions[bus_id] = snap_point(Point(x, y), grid)
-            orientations[bus_id] = 0.0
-            lengths[bus_id] = _busbar_length(terminal_counts.get(bus_id, 0))
-        return positions, orientations, lengths
+    def place_subtree(identifier: UUID, center_x: float) -> None:
+        positions[identifier] = snap_point(Point(center_x, top_y + depth[identifier] * level_pitch), grid)
+        orientations[identifier] = 0.0
+        child_items = sorted(children[identifier], key=lambda item: bus_order[item])
+        if not child_items:
+            return
+        total_width = sum(subtree_width(item) for item in child_items) + branch_gap * (len(child_items) - 1)
+        left = center_x - total_width / 2.0
+        for child in child_items:
+            width = subtree_width(child)
+            child_center = left + width / 2.0
+            place_subtree(child, child_center)
+            left += width + branch_gap
 
-    # Branching/cyclic networks: breadth-first discovery assigns a unique row
-    # to every bus.  Depth alternates between two compact columns; connected
-    # equipment is still rendered vertically and its conductors dog-leg only
-    # after leaving each horizontal busbar.
-    bus_order = {bus.id: index for index, bus in enumerate(network.buses)}
-    source_priority = _source_priority(network, shunts)
-    roots = sorted(
-        network.buses,
-        key=lambda bus: (source_priority.get(bus.id, 9), bus_order[bus.id]),
-    )
-    depth: dict[UUID, int] = {}
-    component_by_bus: dict[UUID, int] = {}
-    discovered: list[UUID] = []
-    component = 0
-    for root in roots:
-        if root.id in depth:
-            continue
-        queue = deque([root.id])
-        depth[root.id] = 0
-        component_by_bus[root.id] = component
-        while queue:
-            current = queue.popleft()
-            discovered.append(current)
-            for neighbor in sorted(adjacency[current], key=lambda item: bus_order[item]):
-                if neighbor not in depth:
-                    depth[neighbor] = depth[current] + 1
-                    component_by_bus[neighbor] = component
-                    queue.append(neighbor)
-        component += 1
+    for root in component_roots:
+        width = subtree_width(root)
+        place_subtree(root, cursor_x + width / 2.0)
+        cursor_x += width + 620.0
 
-    row_by_bus = {bus_id: row for row, bus_id in enumerate(discovered)}
-    component_x = {index: index * 440.0 for index in range(component)}
-    for bus_id in discovered:
-        component_index = component_by_bus[bus_id]
-        column = depth[bus_id] % 2
-        x = x_left + column * (x_right - x_left) + component_x[component_index]
-        y = y_top + row_by_bus[bus_id] * row_spacing
-        positions[bus_id] = snap_point(Point(x, y), grid)
-        orientations[bus_id] = 0.0
-        lengths[bus_id] = _busbar_length(terminal_counts.get(bus_id, 0))
+    for bus in network.buses:
+        lengths[bus.id] = _busbar_length(terminal_counts.get(bus.id, 0))
     return positions, orientations, lengths
 
+
+def _estimated_label_width(text: str, size_pt: float = 9.0) -> float:
+    return max(48.0, len(text) * size_pt * 0.54 * LABEL_SCENE_UNITS_PER_PT + 24.0)
+
+
+def _automatic_equipment_layout(
+    network: Network, buses: dict[UUID, EngineeringBus],
+) -> dict[UUID, tuple[Point, float]]:
+    """Allocate two-terminal equipment to non-overlapping topology-derived bay lanes."""
+    vertical_requests: list[BayLaneRequest] = []
+    horizontal_requests: list[BayLaneRequest] = []
+    metadata: dict[str, tuple[UUID, float, float, float, float, float]] = {}
+    connection_by_terminal = _connected_bus_ids(network)
+    for equipment in network.equipment:
+        terminals = tuple(equipment.terminals)
+        if len(terminals) != 2:
+            continue
+        first_bus_id = connection_by_terminal.get(terminals[0].id)
+        second_bus_id = connection_by_terminal.get(terminals[1].id)
+        if first_bus_id not in buses or second_bus_id not in buses:
+            continue
+        first = buses[first_bus_id]
+        second = buses[second_bus_id]
+        family, _state = _equipment_family(equipment)
+        definition = get_symbol_definition(family)
+        label_width = _estimated_label_width(equipment.name)
+        same_level = abs(second.center.y - first.center.y) < 1e-6
+        request_id = str(equipment.id)
+        if same_level:
+            left = min(first.center.x, second.center.x)
+            right = max(first.center.x, second.center.x)
+            if right - left < 120.0:
+                left -= 60.0
+                right += 60.0
+            start, end = left, right
+            preferred = max(first.center.y, second.center.y) + 190.0
+            width = max(definition.height + 32.0, 76.0)
+            horizontal_requests.append(BayLaneRequest(request_id, start, end, preferred, width))
+            metadata[request_id] = (equipment.id, (first.center.x + second.center.x) / 2.0,
+                                    (first.center.y + second.center.y) / 2.0, 0.0,
+                                    definition.width, definition.height)
+        else:
+            top = min(first.center.y, second.center.y)
+            bottom = max(first.center.y, second.center.y)
+            if bottom - top < 180.0:
+                top -= 90.0
+                bottom += 90.0
+            preferred = (first.center.x + second.center.x) / 2.0
+            width = max(definition.height + 32.0, label_width + 24.0)
+            vertical_requests.append(BayLaneRequest(request_id, top, bottom, preferred, width))
+            direction = 90.0 if second.center.y >= first.center.y else -90.0
+            metadata[request_id] = (equipment.id, preferred, (first.center.y + second.center.y) / 2.0,
+                                    direction, definition.width, definition.height)
+    vertical_lanes = layout_bay_lanes(vertical_requests, gap=56.0, search_step=100.0)
+    horizontal_lanes = layout_bay_lanes(horizontal_requests, gap=44.0, search_step=100.0)
+    result: dict[UUID, tuple[Point, float]] = {}
+    for request_id, (equipment_id, base_x, base_y, orientation, _width, _height) in metadata.items():
+        if request_id in vertical_lanes:
+            center = Point(vertical_lanes[request_id], base_y)
+        else:
+            center = Point(base_x, horizontal_lanes[request_id])
+        result[equipment_id] = (center, orientation)
+    return result
 
 def _bus_bounds(center: Point, orientation: float, length: float) -> Rect:
     if abs(orientation % 180.0) < 1e-6:
@@ -376,7 +428,9 @@ def _bus_bounds(center: Point, orientation: float, length: float) -> Rect:
 
 
 def _bus_tap(bus: EngineeringBus, target: Point) -> Point:
-    """Nearest explicit tap on the finite busbar segment."""
+    """Nearest explicit tap on the finite busbar segment or point node."""
+    if bus.kind == "connection_node":
+        return bus.center
     orientation = bus.orientation_deg % 180.0
     if abs(orientation) < 1e-6:
         offset = max(-bus.bounds.width / 2.0,
@@ -468,7 +522,7 @@ def _equipment_center_for_single_terminal(
     if abs(bus.orientation_deg % 180.0) < 1e-6:
         # A shunt bay occupies the adjacent vertical corridor.  Do not place it
         # beyond half the busbar length: doing so can overlap the next bus row.
-        y = bus.center.y - 72.0 if family == "source" else bus.center.y + 72.0
+        y = bus.center.y - 130.0 if family == "source" else bus.center.y + 140.0
         return Point(tap.x, y)
     half_bus_extent_x = bus.bounds.width / 2.0
     x = (
@@ -490,13 +544,17 @@ def _route_to_terminal(
 
 def _tap_point(bus: EngineeringBus, coordinate: float) -> Point:
     """Convert a scalar coordinate on a busbar axis into a scene point."""
+    if bus.kind == "connection_node":
+        return bus.center
     if abs(bus.orientation_deg % 180.0) < 1e-6:
         return Point(coordinate, bus.center.y)
     return Point(bus.center.x, coordinate)
 
 
 def _available_bus_axis(bus: EngineeringBus) -> tuple[float, float, float]:
-    """Return the usable scalar interval and center of a finite busbar."""
+    """Return the usable scalar interval and center of a finite busbar or node."""
+    if bus.kind == "connection_node":
+        return bus.center.x, bus.center.x, bus.center.x
     if abs(bus.orientation_deg % 180.0) < 1e-6:
         low, high, center = bus.bounds.x + 10.0, bus.bounds.right - 10.0, bus.center.x
     else:
@@ -531,6 +589,7 @@ def _choose_free_tap(
 
 def _terminal_bus_taps(
     network: Network, buses: dict[UUID, EngineeringBus],
+    preferred_equipment_positions: dict[UUID, Point] | None = None,
 ) -> dict[UUID, Point]:
     """Allocate unique taps and align both ends of each bay on a shared lane.
 
@@ -540,6 +599,7 @@ def _terminal_bus_taps(
     needless horizontal jogs.  Shunt equipment is then placed over its own
     free tap.  All assignments come from canonical terminal-to-bus links.
     """
+    preferred_equipment_positions = preferred_equipment_positions or {}
     equipment_by_terminal = {
         terminal.id: (equipment, terminal)
         for equipment in network.equipment
@@ -570,7 +630,9 @@ def _terminal_bus_taps(
             low = max(_available_bus_axis(first_bus)[0], _available_bus_axis(second_bus)[0])
             high = min(_available_bus_axis(first_bus)[1], _available_bus_axis(second_bus)[1])
             if high >= low:
-                preferred = (low + high) / 2.0
+                preferred_point = preferred_equipment_positions.get(equipment.id)
+                preferred = preferred_point.x if preferred_point is not None else (low + high) / 2.0
+                preferred = max(low, min(high, preferred))
                 # The selected coordinate must be free on both buses. Search the
                 # common interval by increasing distance from its center.
                 steps = max(1, int((high - low) // 2.0))
@@ -581,15 +643,15 @@ def _terminal_bus_taps(
                 # symbols; only constrained/manual bar overlaps relax it.
                 already_used = occupied[first_bus.bus_id] + occupied[second_bus.bus_id]
                 chosen = next((value for value in candidates
-                               if all(abs(value - used) >= 56.0 - 1e-7
+                               if all(abs(value - used) >= 120.0 - 1e-7
                                       for used in already_used)), None)
                 if chosen is None:
                     chosen = next((value for value in candidates
-                                   if all(abs(value - used) >= 36.0 - 1e-7
+                                   if all(abs(value - used) >= 80.0 - 1e-7
                                           for used in already_used)), None)
                 if chosen is None:
                     chosen = next((value for value in candidates
-                                   if all(abs(value - used) >= 18.0 - 1e-7
+                                   if all(abs(value - used) >= 48.0 - 1e-7
                                           for used in already_used)), None)
                 if chosen is not None:
                     result[terminals[0].id] = _tap_point(first_bus, chosen)
@@ -632,14 +694,17 @@ def _terminal_bus_taps(
                 continue
             family, _ = _equipment_family(equipment)
             _low, _high, center = _available_bus_axis(bus)
-            if family == "source":
+            preferred_point = preferred_equipment_positions.get(equipment.id)
+            if preferred_point is not None:
+                preferred = preferred_point.x if abs(bus.orientation_deg % 180.0) < 1e-6 else preferred_point.y
+            elif family == "source":
                 preferred = center - bus.length * 0.30
             elif family == "generator":
                 preferred = center + bus.length * 0.30
             else:
                 preferred = center
             coordinate = _choose_free_tap(
-                bus, occupied[bus_id], preferred, minimum_separation=56.0
+                bus, occupied[bus_id], preferred, minimum_separation=110.0
             )
             result[terminal.id] = _tap_point(bus, coordinate)
             occupied[bus_id].append(coordinate)
@@ -826,35 +891,55 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
             length = _busbar_length(sum(
                 1 for connection in network.connections if connection.bus_id == bus.id
             ))
-        bounds = _bus_bounds(center, orientation, length)
-        projected = EngineeringBus(bus.id, bus.name, bus.nominal_voltage.value_kv,
-                                   bounds, center, orientation)
+        bus_kind = getattr(bus.kind, "value", str(bus.kind))
+        bounds = (
+            Rect(center.x - 6.0, center.y - 6.0, 12.0, 12.0)
+            if bus_kind == "connection_node"
+            else _bus_bounds(center, orientation, length)
+        )
+        projected = EngineeringBus(
+            bus.id, bus.name, bus.nominal_voltage.value_kv, bounds, center,
+            orientation, kind=bus_kind,
+        )
         buses.append(projected)
         bus_by_identifier[bus.id] = projected
-
-    terminal_bus_taps = _terminal_bus_taps(network, bus_by_identifier)
 
     placements_by_equipment = {
         item.equipment_id: item for item in workspace.diagram_symbols.values()
         if item.equipment_id is not None
     }
+    automatic_equipment_layout = _automatic_equipment_layout(network, bus_by_identifier)
+    preferred_equipment_positions = {
+        identifier: value[0] for identifier, value in automatic_equipment_layout.items()
+    }
+    for equipment_id in {item.id for item in network.equipment}:
+        if equipment_id in workspace.diagram_positions:
+            x, y = workspace.diagram_positions[equipment_id]
+            preferred_equipment_positions[equipment_id] = Point(float(x), float(y))
+        placement = placements_by_equipment.get(equipment_id)
+        if placement is not None:
+            preferred_equipment_positions[equipment_id] = Point(float(placement.x), float(placement.y))
+    terminal_bus_taps = _terminal_bus_taps(
+        network, bus_by_identifier, preferred_equipment_positions
+    )
     symbols: list[EngineeringSymbol] = []
     conductors: list[EngineeringConductor] = []
     labels: list[EngineeringLabel] = []
     diagnostics: list[str] = []
 
     for bus in buses:
-        if abs(bus.orientation_deg % 180.0) < 1e-6:
-            # Put both identifiers beyond the physical right end of the bar.
-            # This keeps bay drops and junctions clear of bus names/voltages.
-            label_x = bus.bounds.right + 12.0
-            name_position = Point(label_x, bus.center.y - 11.0)
-            voltage_position = Point(label_x, bus.center.y + 23.0)
-            name_anchor = voltage_anchor = "start"
+        if bus.kind == "connection_node":
+            name_position = Point(bus.center.x, bus.center.y - 18.0)
+            voltage_position = Point(bus.center.x, bus.center.y + 30.0)
+            name_anchor = voltage_anchor = "middle"
+        elif abs(bus.orientation_deg % 180.0) < 1e-6:
+            name_position = Point(bus.center.x, bus.center.y - 20.0)
+            voltage_position = Point(bus.center.x, bus.center.y + 30.0)
+            name_anchor = voltage_anchor = "middle"
         else:
-            label_x = bus.center.x - 16.0
-            name_position = Point(label_x, bus.center.y - bus.bounds.height / 2.0 - 13.0)
-            voltage_position = Point(label_x, bus.center.y + bus.bounds.height / 2.0 + 27.0)
+            label_x = bus.center.x - bus.bounds.width / 2.0 - 14.0
+            name_position = Point(label_x, bus.center.y - 7.0)
+            voltage_position = Point(label_x, bus.center.y + 20.0)
             name_anchor = voltage_anchor = "end"
         labels.append(_label(bus.bus_id, bus.name, name_position, anchor=name_anchor,
                              size_pt=9.2, weight="semibold", priority=10,
@@ -895,20 +980,12 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
             terminal_points = (_transform_local(center, terminal_local, orientation),)
         elif len(terminals) == 2:
             first, second = (bus_by_identifier[item] for item in connected_buses)
-            # Bay equipment is vertical between horizontal busbars.  Its pins
-            # are therefore perpendicular to both busbars by construction.
-            first_tap = terminal_bus_taps[terminals[0].id]
-            second_tap = terminal_bus_taps[terminals[1].id]
-            if abs(second.center.y - first.center.y) < 1e-6:
-                # Preserve manually aligned buses while moving the device into
-                # a dedicated bay corridor below them; it must not split a bar.
-                orientation = 90.0
-                center = Point((first_tap.x + second_tap.x) / 2.0,
-                               first.center.y + max(110.0, definition.width / 2.0 + 48.0))
-            else:
-                orientation = 90.0 if second.center.y > first.center.y else -90.0
-                center = Point((first_tap.x + second_tap.x) / 2.0,
-                               (first.center.y + second.center.y) / 2.0)
+            default_center, default_orientation = automatic_equipment_layout.get(
+                equipment.id, (Point((first.center.x + second.center.x) / 2.0,
+                                     (first.center.y + second.center.y) / 2.0), 90.0)
+            )
+            center = default_center
+            orientation = default_orientation
             terminal_points = tuple(
                 _transform_local(center, (item.x, item.y), orientation)
                 for item in definition.terminals
@@ -951,7 +1028,11 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
             ))
 
         label_text = placement.label if placement is not None and placement.label else equipment.name
-        label_side = "below" if family == "generator" and len(terminals) == 1 else "above"
+        label_side = (
+            "below" if (len(terminals) == 2 and abs(orientation) > 1e-6)
+            or (len(terminals) == 1 and family in {"generator", "load", "capacitor", "reactor", "compensation"})
+            else "above"
+        )
         labels.extend(_layout_equipment_label(
             equipment.id, label_text, state, center, width, height, orientation,
             side=label_side,

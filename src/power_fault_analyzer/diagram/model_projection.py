@@ -35,7 +35,15 @@ from power_fault_analyzer.equipment.transformers.two_winding_transformer import 
 )
 from power_fault_analyzer.equipment.transmission.line import Line
 
-from .layout import Point, Rect, perpendicular_bay_route, snap_point
+from .layout import (
+    Point,
+    Rect,
+    anchored_label_bounds,
+    perpendicular_bay_route,
+    rotated_rect_bounds,
+    segment_bounds,
+    snap_point,
+)
 from .symbol_catalog import get_symbol_definition
 from .topology_layout import BayLaneRequest, layout_bay_lanes
 
@@ -775,13 +783,7 @@ def _label_bounds_at(
     """Return the physical text envelope at a candidate baseline and anchor."""
     width = max(24.0, len(label.text) * label.size_pt * 0.54 * LABEL_SCENE_UNITS_PER_PT)
     height = _label_scene_height(label.size_pt)
-    if anchor == "middle":
-        left = position.x - width / 2.0
-    elif anchor == "end":
-        left = position.x - width
-    else:
-        left = position.x
-    return Rect(left, position.y - height, width, height)
+    return anchored_label_bounds(position, width, height, anchor)
 
 
 def _local_equipment_label_candidates(
@@ -886,10 +888,7 @@ def _local_equipment_label_candidates(
 
 
 def _wire_bounds(first: Point, second: Point, clearance: float = 6.0) -> Rect:
-    left = min(first.x, second.x) - clearance / 2.0
-    top = min(first.y, second.y) - clearance / 2.0
-    return Rect(left, top, max(clearance, abs(second.x - first.x) + clearance),
-                max(clearance, abs(second.y - first.y) + clearance))
+    return segment_bounds(first, second, clearance)
 
 
 def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
@@ -1227,11 +1226,7 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
 
 
 def _rotated_bounds(center: Point, width: float, height: float, angle_deg: float) -> Rect:
-    angle = radians(angle_deg % 180.0)
-    rotated_width = abs(width * cos(angle)) + abs(height * sin(angle))
-    rotated_height = abs(width * sin(angle)) + abs(height * cos(angle))
-    return Rect(center.x - rotated_width / 2.0, center.y - rotated_height / 2.0,
-                max(rotated_width, 0.1), max(rotated_height, 0.1))
+    return rotated_rect_bounds(center, width, height, angle_deg)
 
 
 def validate_diagram_document(

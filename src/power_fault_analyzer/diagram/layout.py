@@ -60,6 +60,15 @@ class ElementMetrics(StrEnum):
     SWITCHING = "switching"
     PROTECTION = "protection"
     TERMINAL = "terminal"
+    CONNECTION_NODE = "connection_node"
+    LINE = "line"
+    CIRCUIT_BREAKER = "circuit_breaker"
+    DISCONNECTOR = "disconnector"
+    EARTHING_SWITCH = "earthing_switch"
+    LOAD = "load"
+    CAPACITOR = "capacitor"
+    REACTOR = "reactor"
+    COMPENSATION = "compensation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +87,15 @@ SYMBOL_METRICS: dict[ElementMetrics, SymbolMetrics] = {
     ElementMetrics.SWITCHING: SymbolMetrics(24.0, 54.0, 24.0),
     ElementMetrics.PROTECTION: SymbolMetrics(32.0, 32.0, 20.0),
     ElementMetrics.TERMINAL: SymbolMetrics(8.0, 8.0, 12.0),
+    ElementMetrics.CONNECTION_NODE: SymbolMetrics(12.0, 12.0, 16.0),
+    ElementMetrics.LINE: SymbolMetrics(44.0, 18.0, 28.0),
+    ElementMetrics.CIRCUIT_BREAKER: SymbolMetrics(44.0, 28.0, 28.0),
+    ElementMetrics.DISCONNECTOR: SymbolMetrics(44.0, 28.0, 28.0),
+    ElementMetrics.EARTHING_SWITCH: SymbolMetrics(44.0, 32.0, 28.0),
+    ElementMetrics.LOAD: SymbolMetrics(52.0, 52.0, 32.0),
+    ElementMetrics.CAPACITOR: SymbolMetrics(48.0, 56.0, 32.0),
+    ElementMetrics.REACTOR: SymbolMetrics(52.0, 64.0, 32.0),
+    ElementMetrics.COMPENSATION: SymbolMetrics(52.0, 52.0, 32.0),
 }
 
 
@@ -115,6 +133,50 @@ def snap_value(value: float, spacing: float) -> float:
 def snap_point(point: Point, spacing: float) -> Point:
     return Point(snap_value(point.x, spacing), snap_value(point.y, spacing))
 
+
+def rotated_rect_bounds(
+    center: Point, width: float, height: float, rotation_deg: float
+) -> Rect:
+    """Return the axis-aligned envelope of a rotated symbol rectangle."""
+    if (not isfinite(width) or not isfinite(height) or width <= 0.0 or height <= 0.0
+            or not isfinite(rotation_deg)):
+        raise ValueError("Rotated rectangle dimensions and angle must be finite and positive.")
+    angle = radians(rotation_deg % 360.0)
+    rotated_width = abs(width * cos(angle)) + abs(height * sin(angle))
+    rotated_height = abs(width * sin(angle)) + abs(height * cos(angle))
+    return Rect(
+        center.x - rotated_width / 2.0,
+        center.y - rotated_height / 2.0,
+        max(rotated_width, 0.1),
+        max(rotated_height, 0.1),
+    )
+
+
+def segment_bounds(first: Point, second: Point, clearance: float = 6.0) -> Rect:
+    """Return a collision envelope for a rendered conductor segment."""
+    if not isfinite(clearance) or clearance <= 0.0:
+        raise ValueError("Segment clearance must be finite and positive.")
+    left = min(first.x, second.x) - clearance / 2.0
+    top = min(first.y, second.y) - clearance / 2.0
+    return Rect(
+        left, top, max(clearance, abs(second.x - first.x) + clearance),
+        max(clearance, abs(second.y - first.y) + clearance),
+    )
+
+
+def anchored_label_bounds(
+    position: Point, width: float, height: float, anchor: str
+) -> Rect:
+    """Return a text envelope using SVG/Qt's shared baseline anchor convention."""
+    if (not isfinite(width) or not isfinite(height) or width <= 0.0 or height <= 0.0
+            or anchor not in {"start", "middle", "end"}):
+        raise ValueError("Label dimensions and anchor must be valid.")
+    left = (
+        position.x - width / 2.0 if anchor == "middle"
+        else position.x - width if anchor == "end"
+        else position.x
+    )
+    return Rect(left, position.y - height, width, height)
 
 def select_straight_bus_taps(
     terminal_axis_offsets: Sequence[tuple[str, float]],

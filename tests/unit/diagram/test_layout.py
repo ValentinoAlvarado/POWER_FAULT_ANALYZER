@@ -10,11 +10,14 @@ from power_fault_analyzer.diagram.layout import (
     Point,
     Rect,
     align_group,
+    anchored_label_bounds,
     avoid_label_collisions,
     layout_rows,
     orthogonal_route,
     perpendicular_bay_route,
     select_straight_bus_taps,
+    rotated_rect_bounds,
+    segment_bounds,
     snap_point,
 )
 
@@ -99,3 +102,51 @@ def test_vertical_bus_also_allows_a_straight_perpendicular_drop():
         bus_tap,
         equipment_terminal,
     )
+
+
+@pytest.mark.parametrize(
+    ("family", "expected_width", "expected_height"),
+    [
+        (ElementMetrics.CONNECTION_NODE, 12.0, 12.0),
+        (ElementMetrics.LINE, 44.0, 18.0),
+        (ElementMetrics.CIRCUIT_BREAKER, 44.0, 28.0),
+        (ElementMetrics.DISCONNECTOR, 44.0, 28.0),
+        (ElementMetrics.EARTHING_SWITCH, 44.0, 32.0),
+        (ElementMetrics.LOAD, 52.0, 52.0),
+        (ElementMetrics.CAPACITOR, 48.0, 56.0),
+        (ElementMetrics.REACTOR, 52.0, 64.0),
+        (ElementMetrics.COMPENSATION, 52.0, 52.0),
+    ],
+)
+def test_layout_metrics_cover_distinct_equipment_families(family, expected_width, expected_height):
+    element = DiagramElement("E-1", family, Point(100.0, 200.0))
+    assert element.bounds.width == expected_width
+    assert element.bounds.height == expected_height
+
+
+def test_shared_geometry_envelopes_cover_rotated_symbols_wires_and_label_anchors():
+    vertical = rotated_rect_bounds(Point(100.0, 200.0), 44.0, 28.0, 90.0)
+    assert vertical.width == pytest.approx(28.0)
+    assert vertical.height == pytest.approx(44.0)
+
+    wire = segment_bounds(Point(10.0, 20.0), Point(10.0, 80.0), clearance=6.0)
+    assert wire.x == pytest.approx(7.0)
+    assert wire.width == pytest.approx(6.0)
+    assert wire.y == pytest.approx(17.0)
+    assert wire.height == pytest.approx(66.0)
+
+    centered = anchored_label_bounds(Point(100.0, 200.0), 80.0, 14.0, "middle")
+    right = anchored_label_bounds(Point(100.0, 200.0), 80.0, 14.0, "start")
+    left = anchored_label_bounds(Point(100.0, 200.0), 80.0, 14.0, "end")
+    assert centered.x == pytest.approx(60.0)
+    assert right.x == pytest.approx(100.0)
+    assert left.x == pytest.approx(20.0)
+
+
+def test_shared_geometry_rejects_non_finite_or_invalid_envelopes():
+    with pytest.raises(ValueError, match="positive"):
+        rotated_rect_bounds(Point(0.0, 0.0), 44.0, -1.0, 0.0)
+    with pytest.raises(ValueError, match="positive"):
+        segment_bounds(Point(0.0, 0.0), Point(1.0, 1.0), clearance=0.0)
+    with pytest.raises(ValueError, match="anchor"):
+        anchored_label_bounds(Point(0.0, 0.0), 80.0, 14.0, "center")

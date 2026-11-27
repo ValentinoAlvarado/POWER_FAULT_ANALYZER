@@ -63,8 +63,9 @@ if (-not (Test-Path -LiteralPath $licenseDirectory -PathType Container)) {
     throw 'LICENSES directory is required for third-party redistribution notices.'
 }
 if (-not (Test-Path -LiteralPath (Join-Path $assetRoot 'ELEMENTS.LICENSE'))) {
+    # The acquisition script reports failures with terminating PowerShell errors.
+    # LASTEXITCODE is only meaningful after a native executable has run.
     & (Join-Path $PSScriptRoot 'Acquire-QElectroTechSymbolSeed.ps1') -RepositoryRoot $RepositoryRoot
-    if ($LASTEXITCODE -ne 0) { throw 'Pinned QElectroTech symbol acquisition failed.' }
 }
 
 $releaseVersion = $env:PFA_RELEASE_VERSION
@@ -94,9 +95,9 @@ if (-not $SkipTests) {
     Invoke-Checked 'Complete pytest suite' {
         & $Python -m pytest -q
     }
-    Invoke-Checked 'APP-REBOOT-005 desktop, QElectroTech and Qt acceptance' {
-        & (Join-Path $PSScriptRoot 'verify_app_reboot_005.ps1')
-    }
+    Write-Host '== APP-REBOOT-005 desktop, QElectroTech and Qt acceptance ==' -ForegroundColor Cyan
+    # The verifier is a PowerShell script that owns its native-command exit checks.
+    & (Join-Path $PSScriptRoot 'verify_app_reboot_005.ps1')
 }
 
 $distRoot = Join-Path $RepositoryRoot 'dist'
@@ -142,9 +143,9 @@ if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
     throw 'PyInstaller completed without POWER_FAULT_ANALYZER.exe.'
 }
 if (-not $SkipTests) {
-    Invoke-Checked 'Frozen Windows executable startup acceptance' {
-        & (Join-Path $PSScriptRoot 'verify_frozen_windows_app.ps1') -Executable $executable
-    }
+    Write-Host '== Frozen Windows executable startup acceptance ==' -ForegroundColor Cyan
+    # The verifier throws if the frozen process exits during the startup window.
+    & (Join-Path $PSScriptRoot 'verify_frozen_windows_app.ps1') -Executable $executable
 }
 
 Copy-Item -LiteralPath $license -Destination $appFolder -Force

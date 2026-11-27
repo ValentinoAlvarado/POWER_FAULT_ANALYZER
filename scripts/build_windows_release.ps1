@@ -70,9 +70,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $assetRoot 'ELEMENTS.LICENSE'))) {
 $releaseVersion = $env:PFA_RELEASE_VERSION
 if ([string]::IsNullOrWhiteSpace($releaseVersion)) {
     $toml = Get-Content (Join-Path $RepositoryRoot 'pyproject.toml') -Raw
-    $match = [regex]::Match($toml, '(?m)^version\s*=\s*"([^"]+)"')
+    $match = [regex]::Match($toml, '(?m)^version\s*=\s*(?:"([^"]+)"|''([^'']+)'')\s*$')
     if (-not $match.Success) { throw 'Could not read project version from pyproject.toml.' }
-    $releaseVersion = "v$($match.Groups[1].Value)"
+    $parsedVersion = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+    $releaseVersion = "v$parsedVersion"
 }
 $displayVersion = $releaseVersion.Trim()
 if ($displayVersion.StartsWith('v')) { $displayVersion = $displayVersion.Substring(1) }

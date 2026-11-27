@@ -283,11 +283,13 @@ def _path_order(network: Network, adjacency: dict[UUID, set[UUID]], shunts: dict
     return ordered
 
 
-def _busbar_length(terminal_count: int) -> float:
-    """Size a busbar from its explicit terminal incidence and bay count."""
+def _busbar_length(terminal_count: int, bay_spacing: float = 180.0) -> float:
+    """Size a busbar from its explicit terminal incidence and label envelope."""
     if terminal_count < 0:
         raise ValueError("terminal_count cannot be negative")
-    return 220.0 + max(0, terminal_count - 1) * 180.0
+    if bay_spacing <= 0.0:
+        raise ValueError("bay_spacing must be positive")
+    return 220.0 + max(0, terminal_count - 1) * bay_spacing
 
 
 def _automatic_bus_layout(network: Network, grid: float):
@@ -361,8 +363,20 @@ def _automatic_bus_layout(network: Network, grid: float):
         place_subtree(root, cursor_x + width / 2.0)
         cursor_x += width + 620.0
 
+    equipment_by_terminal = {
+        terminal.id: equipment
+        for equipment in network.equipment
+        for terminal in equipment.terminals
+    }
     for bus in network.buses:
-        lengths[bus.id] = _busbar_length(terminal_counts.get(bus.id, 0))
+        connected_names = [
+            equipment_by_terminal[item.terminal_id].name
+            for item in network.connections
+            if item.bus_id == bus.id and item.terminal_id in equipment_by_terminal
+        ]
+        widest_label = max((_estimated_label_width(name) for name in connected_names), default=180.0)
+        spacing = max(180.0, widest_label)
+        lengths[bus.id] = _busbar_length(terminal_counts.get(bus.id, 0), spacing)
     return positions, orientations, lengths
 
 
@@ -616,6 +630,14 @@ def _terminal_bus_taps(
         for terminal in equipment.terminals
     }
     bus_by_terminal = {item.terminal_id: item.bus_id for item in network.connections}
+    clearance_by_bus: dict[UUID, float] = defaultdict(lambda: 120.0)
+    for connection in network.connections:
+        equipment_pair = equipment_by_terminal.get(connection.terminal_id)
+        if equipment_pair is not None:
+            clearance_by_bus[connection.bus_id] = max(
+                clearance_by_bus[connection.bus_id],
+                _estimated_label_width(equipment_pair[0].name),
+            )
     result: dict[UUID, Point] = {}
     occupied: dict[UUID, list[float]] = defaultdict(list)
 
@@ -652,16 +674,20 @@ def _terminal_bus_taps(
                 # preferred lane separation is based on the widest built-in
                 # symbols; only constrained/manual bar overlaps relax it.
                 already_used = occupied[first_bus.bus_id] + occupied[second_bus.bus_id]
+                minimum_separation = max(
+                    clearance_by_bus[first_bus.bus_id],
+                    clearance_by_bus[second_bus.bus_id],
+                )
                 chosen = next((value for value in candidates
-                               if all(abs(value - used) >= max(120.0, _estimated_label_width(equipment.name)) - 1e-7
+                               if all(abs(value - used) >= minimum_separation - 1e-7
                                       for used in already_used)), None)
                 if chosen is None:
                     chosen = next((value for value in candidates
-                                   if all(abs(value - used) >= 80.0 - 1e-7
+                                   if all(abs(value - used) >= minimum_separation * 0.7 - 1e-7
                                           for used in already_used)), None)
                 if chosen is None:
                     chosen = next((value for value in candidates
-                                   if all(abs(value - used) >= 48.0 - 1e-7
+                                   if all(abs(value - used) >= 18.0 - 1e-7
                                           for used in already_used)), None)
                 if chosen is not None:
                     result[terminals[0].id] = _tap_point(first_bus, chosen)
@@ -714,7 +740,7 @@ def _terminal_bus_taps(
             else:
                 preferred = center
             coordinate = _choose_free_tap(
-                bus, occupied[bus_id], preferred, minimum_separation=110.0
+                bus, occupied[bus_id], preferred, minimum_separation=clearance_by_bus[bus_id]
             )
             result[terminal.id] = _tap_point(bus, coordinate)
             occupied[bus_id].append(coordinate)
@@ -897,10 +923,6 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
         else:
             orientation = 0.0
         length = auto_lengths.get(bus.id, _busbar_length(sum(1 for connection in network.connections if connection.bus_id == bus.id)))
-        if bus.id in workspace.diagram_positions and bus.id not in workspace.diagram_rotations:
-            length = _busbar_length(sum(
-                1 for connection in network.connections if connection.bus_id == bus.id
-            ))
         bus_kind = getattr(bus.kind, "value", str(bus.kind))
         bounds = (
             Rect(center.x - 6.0, center.y - 6.0, 12.0, 12.0)

@@ -3,6 +3,9 @@ name: Windows desktop release
 on:
   workflow_dispatch:
   push:
+    branches:
+      - "fix/portable-code-automation-worker"
+  push:
     tags:
       - "v*"
 

@@ -158,8 +158,12 @@ def test_pfa_es001_svg_preserves_physical_busbars_and_internal_connection_nodes(
     assert len(document.conductors) == 18
     assert not any("LABEL_COLLISION:" in item for item in document.diagnostics)
     canonical_by_id = {item.equipment_id: item for item in document.symbols}
+    switching_families = {"circuit_breaker", "disconnector", "earthing_switch"}
     mapped_switches = [
-        item for item in built.workspace.diagram_symbols.values() if item.equipment_id is not None
+        placement
+        for placement in built.workspace.diagram_symbols.values()
+        if placement.equipment_id in canonical_by_id
+        and canonical_by_id[placement.equipment_id].family in switching_families
     ]
     assert len(mapped_switches) == 8
     for placement in mapped_switches:

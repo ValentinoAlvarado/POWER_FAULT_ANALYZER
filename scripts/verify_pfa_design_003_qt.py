@@ -136,7 +136,7 @@ def main() -> int:
                       or abs(points[-1][1] - points[-2][1]) > 0.5):
                     raise RuntimeError(f"{name}: dragged conductor {key} lost perpendicular bus/pin approach.")
             route_length = sum(abs(x2 - x1) + abs(y2 - y1)
-                               for (x1, y1), (x2, y2) in zip(points, points[1:]))
+                               for (x1, y1), (x2, y2) in itertools.pairwise(points))
             direct_length = abs(points[-1][0] - points[0][0]) + abs(points[-1][1] - points[0][1])
             if abs(route_length - direct_length) > 0.5:
                 raise RuntimeError(

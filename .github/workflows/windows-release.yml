@@ -80,7 +80,8 @@ jobs:
             "dist/release/SBOM.cdx.json",
             "dist/release/PYTHON-DEPENDENCY-LICENSES.md",
             "dist/release/THIRD_PARTY_NOTICES.md",
-            "dist/release/BUILD-INFO.json"
+            "dist/release/BUILD-INFO.json",
+            "dist/release/Update-PFA-Portable.ps1"
           )
           foreach ($file in $required) {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Required release artifact missing: $file" }
@@ -107,6 +108,8 @@ jobs:
             dist/release/PYTHON-DEPENDENCY-LICENSES.md
             dist/release/THIRD_PARTY_NOTICES.md
             dist/release/BUILD-INFO.json
+            dist/release/Update-PFA-Portable.ps1
+            dist/release/Update-PFA-Portable.ps1
 
       - name: Publish GitHub Release assets
         if: startsWith(github.ref, 'refs/tags/')

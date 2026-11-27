@@ -29,8 +29,10 @@ jobs:
       - name: Acquire pinned QElectroTech symbol assets
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          # This is a PowerShell script, not a native executable. Its terminating
+          # errors propagate directly; LASTEXITCODE is undefined/null here.
           ./scripts/Acquire-QElectroTechSymbolSeed.ps1
-          if ($LASTEXITCODE -ne 0) { throw "Pinned QElectroTech asset acquisition failed." }
 
       - name: Install Cairo native runtime
         uses: msys2/setup-msys2@v2
@@ -55,8 +57,10 @@ jobs:
       - name: Build, test and package portable Windows application
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          # The build script checks every native tool it invokes and throws on
+          # failure. Do not inspect LASTEXITCODE after invoking a .ps1 script.
           ./scripts/build_windows_release.ps1
-          if ($LASTEXITCODE -ne 0) { throw "Windows package build failed." }
 
       - name: Require reviewed licenses for packages without metadata
         if: startsWith(github.ref, 'refs/tags/')

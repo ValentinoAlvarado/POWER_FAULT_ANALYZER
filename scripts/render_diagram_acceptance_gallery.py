@@ -39,7 +39,6 @@ from power_fault_analyzer.domain.entities.bus import Bus
 from power_fault_analyzer.domain.entities.terminal import Terminal
 from power_fault_analyzer.domain.enums.bus_kind import BusKind
 from power_fault_analyzer.domain.enums.equipment_family import EquipmentFamily
-from power_fault_analyzer.domain.enums.equipment_interface import ParameterEvidenceStatus
 from power_fault_analyzer.domain.value_objects.voltage import Voltage
 from power_fault_analyzer.equipment.interfaces.unresolved_equipment import EngineeringParameter
 from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import (
@@ -61,11 +60,10 @@ def build_load_compensation_workspace() -> NetworkWorkspace:
     for name, kind, family in definitions:
         identifier = uuid4()
         terminal = Terminal(identifier, "HV", voltage)
+        # This is a visual-only acceptance fixture. Do not fabricate any
+        # nameplate values: unresolved data must remain explicitly unresolved.
         parameters = (
-            EngineeringParameter(
-                "rated_power_mw", "MW", 5.0,
-                ParameterEvidenceStatus.USER_CONFIRMED, "gallery fixture",
-            ),
+            EngineeringParameter("rated_power_mw", "MW"),
             EngineeringParameter("power_factor", "pu"),
         ) if family is EquipmentFamily.LOAD else (
             EngineeringParameter("rated_power_mvar", "MVAr"),

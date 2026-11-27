@@ -1,7 +1,7 @@
 """Windows Qt canvas smoke test for PFA-SYNC-001 canonical scenarios."""
 from __future__ import annotations
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
@@ -11,7 +11,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from examples.canonical_model_scenarios import (
-    build_single_bus_substation, build_double_bus_substation, build_multibus_network,
+    build_double_bus_substation,
+    build_multibus_network,
+    build_single_bus_substation,
 )
 from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import NetworkCanvasView
 

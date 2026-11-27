@@ -15,9 +15,9 @@ from power_fault_analyzer.diagram.layout import (
     layout_rows,
     orthogonal_route,
     perpendicular_bay_route,
-    select_straight_bus_taps,
     rotated_rect_bounds,
     segment_bounds,
+    select_straight_bus_taps,
     snap_point,
 )
 

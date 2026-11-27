@@ -118,6 +118,12 @@ def test_persisted_equipment_label_and_placement_are_used_by_projection(tmp_path
     assert symbol.center.x == 700.0 and symbol.center.y == 360.0
     assert symbol.orientation_deg == 90.0
     assert label.text == "INCOMER BREAKER"
+    # The single mapped source placement must not leak into other equipment.
+    assert all(
+        item.center != symbol.center
+        for item in document.symbols
+        if item.equipment_id != equipment.id
+    )
 
 
 def test_async_script_worker_can_be_cancelled_by_timeout():

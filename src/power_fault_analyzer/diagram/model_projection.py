@@ -1017,6 +1017,7 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
                              label_key="bus-voltage"))
 
     for equipment in network.equipment:
+        placement = placements_by_equipment.get(equipment.id)
         family, state = _equipment_family(equipment)
         definition = get_symbol_definition(family)
         terminals = tuple(equipment.terminals)
@@ -1108,11 +1109,10 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
             ))
 
         label_text = placement.label if placement is not None and placement.label else equipment.name
-        label_side = (
-            "below" if len(terminals) == 1
-            and family in {"generator", "load", "capacitor", "reactor", "compensation"}
-            else "above"
-        )
+        # Single-terminal field equipment is labelled below its glyph so
+        # the annotation stays outside the direct conductor-to-node corridor.
+        # Sources retain their conventional upper label position.
+        label_side = "below" if len(terminals) == 1 and family != "source" else "above"
         labels.extend(_layout_equipment_label(
             equipment.id, label_text, state, center, width, height, orientation,
             side=label_side,

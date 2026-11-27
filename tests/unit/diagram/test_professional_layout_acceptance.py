@@ -156,6 +156,7 @@ def test_pfa_es001_svg_preserves_physical_busbars_and_internal_connection_nodes(
     assert sum(item.kind == "connection_node" for item in document.buses) == 6
     assert len(document.symbols) == 10
     assert len(document.conductors) == 18
+    assert not any("LABEL_COLLISION:" in item for item in document.diagnostics)
     canonical_by_id = {item.equipment_id: item for item in document.symbols}
     mapped_switches = [
         item for item in built.workspace.diagram_symbols.values() if item.equipment_id is not None

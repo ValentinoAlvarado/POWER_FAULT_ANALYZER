@@ -101,7 +101,7 @@ jobs:
       - name: Upload portable release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: POWER-FAULT-ANALYZER-Windows-${{ github.ref_name }}
+          name: POWER-FAULT-ANALYZER-Windows-${{ github.sha }}
           if-no-files-found: error
           path: |
             dist/release/PFA-Windows-x64.zip

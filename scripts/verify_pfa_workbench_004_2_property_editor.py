@@ -17,8 +17,8 @@ from PySide6.QtWidgets import QApplication
 from examples.canonical_model_scenarios import build_single_bus_substation
 from power_fault_analyzer.bootstrap.workbench_container import build_workbench_services
 from power_fault_analyzer.diagram.model_projection import project_network_to_diagram
-from power_fault_analyzer.interfaces.desktop.workbench.workbench_window import WorkbenchWindow
 from power_fault_analyzer.domain.exceptions.network_exceptions import NetworkDomainError
+from power_fault_analyzer.interfaces.desktop.workbench.workbench_window import WorkbenchWindow
 
 
 def _require(condition: bool, message: str) -> None:

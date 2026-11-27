@@ -414,6 +414,26 @@ class CanonicalEquipmentSymbol(QGraphicsObject):
                 QPointF(-metrics.horizontalAdvance(glyph) / 2.0, 0.28 * radius),
                 glyph,
             )
+        elif self.family in {"load", "capacitor", "reactor", "compensation"}:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            definition = get_symbol_definition(self.family)
+            for primitive in definition.primitives:
+                if primitive.kind == "circle":
+                    px, py, radius = primitive.coordinates
+                    painter.drawEllipse(QPointF(px, py), radius, radius)
+                elif primitive.kind == "line":
+                    x1, y1, x2, y2 = primitive.coordinates
+                    painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+            if definition.text_glyph:
+                font = _scene_font("Segoe UI", 8.5, QFont.Weight.DemiBold)
+                painter.setFont(font)
+                metrics = QFontMetricsF(font)
+                painter.setPen(QPen(ink, 0.6 * scene_scale))
+                glyph = definition.text_glyph
+                painter.drawText(
+                    QPointF(-metrics.horizontalAdvance(glyph) / 2.0, metrics.ascent() * 0.34),
+                    glyph,
+                )
         else:
             # The unresolved/generic symbol is a rectangle with an explicit
             # question mark, matching the canonical vector renderer.
@@ -427,6 +447,23 @@ class CanonicalEquipmentSymbol(QGraphicsObject):
                 QPointF(-metrics.horizontalAdvance("?") / 2.0,
                         3.0 * scene_scale),
                 "?",
+            )
+        if self.state in {"unresolved", "partial-data"}:
+            badge_x = self.width / 2.0 + 4.0 * scene_scale
+            badge_y = -self.height / 2.0 - 4.0 * scene_scale
+            badge_radius = 4.0 * scene_scale
+            painter.setPen(QPen(QColor("#D97706"), 0.8 * scene_scale))
+            painter.setBrush(QBrush(QColor("#FFF7ED")))
+            painter.drawEllipse(QPointF(badge_x, badge_y), badge_radius, badge_radius)
+            mark = "?" if self.state == "unresolved" else "!"
+            badge_font = _scene_font("Segoe UI", 6.0, QFont.Weight.Bold)
+            painter.setFont(badge_font)
+            metrics = QFontMetricsF(badge_font)
+            painter.setPen(QPen(QColor("#9A3412"), 0.6 * scene_scale))
+            painter.drawText(
+                QPointF(badge_x - metrics.horizontalAdvance(mark) / 2.0,
+                        badge_y + metrics.ascent() * 0.34),
+                mark,
             )
         painter.restore()
 
@@ -1090,8 +1127,12 @@ class NetworkCanvasView(QGraphicsView):
         # SVG/PDF already render these model-derived tap markers; keeping the
         # Qt scene identical also makes a T-connection distinguishable from a
         # visual crossing. Each dot follows its own connection during dragging.
+        bus_kind_by_id = {item.id: item.kind for item in network.buses}
         for conductor in document.conductors:
-            if not conductor.points:
+            if (
+                not conductor.points
+                or bus_kind_by_id.get(conductor.bus_id) is BusKind.CONNECTION_NODE
+            ):
                 continue
             tap_radius = 1.7 * LABEL_SCENE_UNITS_PER_PT
             marker = QGraphicsEllipseItem(

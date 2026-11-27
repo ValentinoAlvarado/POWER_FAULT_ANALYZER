@@ -770,12 +770,14 @@ class BranchSymbol(QGraphicsPathItem):
     def __init__(
         self, identifier: UUID, name: str, from_point: QPointF, to_point: QPointF, label: str,
         *, snap_enabled: bool = True, grid_spacing: float = 20.0,
+        state: str | None = None,
     ) -> None:
         super().__init__()
         self._branch_signals = _BranchSymbolSignals()
         self._initializing = True
         self.identifier = identifier
         self.name = name
+        self.state = state
         self.snap_enabled = bool(snap_enabled)
         self.grid_spacing = float(grid_spacing)
         self._drag_start = QPointF()
@@ -797,6 +799,39 @@ class BranchSymbol(QGraphicsPathItem):
         self.label_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
         self.label_item.setZValue(5)
         self._initializing = False
+
+    def boundingRect(self) -> QRectF:
+        bounds = super().boundingRect()
+        if self.state in {"unresolved", "partial-data"}:
+            bounds = bounds.united(QRectF(-24.0, -12.0, 18.0, 24.0))
+        return bounds
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        super().paint(painter, option, widget)
+        if self.state not in {"unresolved", "partial-data"}:
+            return
+        path_bounds = self.path().boundingRect()
+        if path_bounds.height() >= path_bounds.width():
+            center = QPointF(-15.0, 0.0)
+        else:
+            center = QPointF(0.0, -15.0)
+        radius = 5.0 * LABEL_SCENE_UNITS_PER_PT
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(QColor("#D97706"), 0.8 * LABEL_SCENE_UNITS_PER_PT))
+        painter.setBrush(QBrush(QColor("#FFF7ED")))
+        painter.drawEllipse(center, radius, radius)
+        mark = "?" if self.state == "unresolved" else "!"
+        font = _scene_font("Segoe UI", 6.0, QFont.Weight.Bold)
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+        painter.setPen(QPen(QColor("#9A3412"), 0.6 * LABEL_SCENE_UNITS_PER_PT))
+        painter.drawText(
+            QPointF(center.x() - metrics.horizontalAdvance(mark) / 2.0,
+                    center.y() + metrics.ascent() * 0.34),
+            mark,
+        )
+        painter.restore()
 
     @property
     def moved(self):
@@ -1157,6 +1192,7 @@ class NetworkCanvasView(QGraphicsView):
                 line = BranchSymbol(
                     equipment.id, equipment.name, p1, p2, "",
                     snap_enabled=self._snap_enabled, grid_spacing=self._grid_spacing,
+                    state=projected.state,
                 )
                 self._scene.addItem(line)
                 self._branch_items[str(equipment.id)] = line

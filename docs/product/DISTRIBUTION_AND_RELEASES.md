@@ -28,7 +28,7 @@ The workflow has two trigger paths:
 - **Manual `workflow_dispatch`:** builds and uploads the portable artifacts as a GitHub Actions workflow artifact. It does not publish a GitHub Release.
 - **Tag push matching `v*`:** builds the same artifacts, executes the dependency-license review gate and publishes a GitHub Release with the six assets when every required step succeeds.
 
-The Windows runner performs pinned QElectroTech asset acquisition, Cairo runtime setup, Ruff lint/format checks, compilation, the complete pytest suite, APP-REBOOT-005 offscreen workbench/QElectroTech acceptance, PyInstaller packaging, a frozen-executable startup smoke, SBOM/license inventory generation and checksum verification.
+The Windows runner performs pinned QElectroTech asset acquisition, Cairo runtime setup, Ruff lint, compilation, the complete pytest suite, APP-REBOOT-005 offscreen workbench/QElectroTech acceptance, PyInstaller packaging, a frozen-executable startup smoke, SBOM/license inventory generation and checksum verification. A repository-wide Ruff formatter gate is deliberately deferred: the current audit reports 56 existing files requiring a separate style-only migration, which should not be mixed into a release/build repair.
 
 The offscreen acceptance exercises selected workbench layout, drawing-symbol preview/placement, rotation, drag, undo/redo and persistence behavior. The frozen-executable smoke launches the packaged process with Qt offscreen and confirms that it remains alive for six seconds. These checks do **not** replace interactive testing on a normal Windows desktop, a clean-machine extraction/launch, inspection of the rendered diagrams or independent electrical benchmark validation.
 

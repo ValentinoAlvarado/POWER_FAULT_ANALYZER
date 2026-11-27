@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-from importlib import metadata
 import json
 import re
 import uuid
+from importlib import metadata
 from pathlib import Path
 
 

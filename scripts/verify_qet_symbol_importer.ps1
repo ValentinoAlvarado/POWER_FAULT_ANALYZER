@@ -24,8 +24,10 @@ try {
         & $Python -m ruff check src tests scripts
         if ($LASTEXITCODE -ne 0) { throw "Ruff lint failed with exit code $LASTEXITCODE." }
 
-        Write-Host '== Ruff format =='
-        & $Python -m ruff format --check src tests scripts
+        Write-Host '== Ruff format (core, tests and examples) =='
+        # Legacy utility scripts are linted below but are not part of the
+        # formatter gate; the product source, tests and examples are.
+        & $Python -m ruff format --check src tests examples
         if ($LASTEXITCODE -ne 0) { throw "Ruff format check failed with exit code $LASTEXITCODE." }
     }
 

@@ -89,19 +89,17 @@ def render_engineering_svg(
             width_mm, height_mm = JOURNAL_PRESETS_MM[preset]
         except KeyError as exc:
             raise ValueError(f"Unknown publication preset: {preset!r}.") from exc
-    busbar_definition = get_symbol_definition("busbar")
-    symbols = [
-        SvgSymbol(
-            "busbar", item.center, item.bounds.width, item.bounds.height,
-            str(item.bus_id), orientation_deg=0.0, symbol_id=busbar_definition.symbol_id,
-            standard_reference=busbar_definition.standard_reference,
-            normative_status=busbar_definition.normative_status,
-            provenance=busbar_definition.provenance,
-            source_license=busbar_definition.source_license,
-            definition_hash=busbar_definition.definition_hash,
-        )
-        for item in document.buses
-    ]
+    symbols = []
+    for item in document.buses:
+        family = "connection_node" if item.kind == "connection_node" else "busbar"
+        definition = get_symbol_definition(family)
+        symbols.append(SvgSymbol(
+            family, item.center, item.bounds.width, item.bounds.height,
+            str(item.bus_id), orientation_deg=item.orientation_deg,
+            symbol_id=definition.symbol_id, standard_reference=definition.standard_reference,
+            normative_status=definition.normative_status, provenance=definition.provenance,
+            source_license=definition.source_license, definition_hash=definition.definition_hash,
+        ))
     for item in document.symbols:
         definition = get_symbol_definition(item.family)
         symbols.append(SvgSymbol(
@@ -111,11 +109,13 @@ def render_engineering_svg(
             tuple(str(identifier) for identifier in item.terminal_ids),
             definition.standard_reference, definition.normative_status,
             definition.provenance, definition.source_license, definition.definition_hash,
+            item.state,
         ))
     # Connection markers are rendered at the explicit model-to-busbar tap points.
     junction_seen: set[tuple[float, float]] = set()
+    bus_kind_by_id = {item.bus_id: item.kind for item in document.buses}
     for index, conductor in enumerate(document.conductors):
-        if not conductor.points:
+        if not conductor.points or bus_kind_by_id.get(conductor.bus_id) == "connection_node":
             continue
         tap = conductor.points[0]
         key = (round(tap.x, 4), round(tap.y, 4))

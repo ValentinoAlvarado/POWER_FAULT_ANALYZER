@@ -65,6 +65,9 @@ from .symbol_catalog import (
     get_symbol_definition as get_symbol_definition,
 )
 from .topology_layout import (
+    BayLaneRequest as BayLaneRequest,
+)
+from .topology_layout import (
     LayoutEdge as LayoutEdge,
 )
 from .topology_layout import (
@@ -72,6 +75,9 @@ from .topology_layout import (
 )
 from .topology_layout import (
     TopologyLayout as TopologyLayout,
+)
+from .topology_layout import (
+    layout_bay_lanes as layout_bay_lanes,
 )
 from .topology_layout import (
     layout_topology as layout_topology,

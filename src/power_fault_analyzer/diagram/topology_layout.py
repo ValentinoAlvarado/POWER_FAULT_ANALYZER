@@ -30,6 +30,74 @@ class TopologyLayout:
     layers: tuple[tuple[str, ...], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class BayLaneRequest:
+    """Horizontal envelope for one equipment bay on a vertical topology span."""
+
+    identifier: str
+    start: float
+    end: float
+    preferred_x: float
+    width: float
+
+    def __post_init__(self) -> None:
+        from math import isfinite
+
+        if not self.identifier:
+            raise ValueError("Bay lane identifiers must be non-empty.")
+        if not all(isfinite(value) for value in (self.start, self.end, self.preferred_x, self.width)):
+            raise ValueError("Bay lane geometry must be finite.")
+        if self.end <= self.start or self.width <= 0.0:
+            raise ValueError("Bay lane spans and widths must be positive.")
+
+
+def layout_bay_lanes(
+    requests: Iterable[BayLaneRequest], *, gap: float = 36.0,
+    search_step: float = 80.0, max_rings: int = 256,
+) -> dict[str, float]:
+    """Allocate stable equipment columns without overlapping active bay spans.
+
+    Each request owns a horizontal visual envelope over a vertical interval.
+    Envelopes may reuse a column only when their vertical intervals do not
+    overlap. Otherwise the allocator searches symmetric offsets from the
+    topology-derived preferred column. Coordinates are presentation-only.
+    """
+    from math import isfinite
+
+    if not isfinite(gap) or gap < 0.0 or not isfinite(search_step) or search_step <= 0.0:
+        raise ValueError("Bay lane gap and search step must be finite and non-negative/positive.")
+    if isinstance(max_rings, bool) or not isinstance(max_rings, int) or max_rings < 1:
+        raise ValueError("max_rings must be a positive integer.")
+    items = tuple(requests)
+    identifiers = [item.identifier for item in items]
+    if len(identifiers) != len(set(identifiers)):
+        raise ValueError("Bay lane identifiers must be unique.")
+    placed: list[tuple[BayLaneRequest, float]] = []
+    result: dict[str, float] = {}
+    for request in sorted(items, key=lambda item: (item.start, item.end, item.preferred_x, item.identifier)):
+        step = max(search_step, request.width + gap)
+        candidates = [request.preferred_x]
+        for ring in range(1, max_rings + 1):
+            candidates.extend((request.preferred_x + ring * step, request.preferred_x - ring * step))
+        chosen = None
+        for candidate in candidates:
+            conflict = False
+            for other, other_x in placed:
+                vertical_overlap = not (request.end <= other.start or other.end <= request.start)
+                horizontal_overlap = abs(candidate - other_x) < (request.width + other.width) / 2.0 + gap
+                if vertical_overlap and horizontal_overlap:
+                    conflict = True
+                    break
+            if not conflict:
+                chosen = candidate
+                break
+        if chosen is None:
+            raise ValueError(f"Could not allocate a collision-free lane for bay {request.identifier!r}.")
+        placed.append((request, chosen))
+        result[request.identifier] = chosen
+    return result
+
+
 def layout_topology(
     nodes: Iterable[LayoutNode], edges: Iterable[LayoutEdge], *,
     origin: Point | None = None, grid: float = 20.0,

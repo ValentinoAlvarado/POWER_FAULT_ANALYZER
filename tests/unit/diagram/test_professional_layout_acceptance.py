@@ -13,8 +13,8 @@ from power_fault_analyzer.application.use_cases.reference_network_template impor
 from power_fault_analyzer.application.use_cases.substation_engineering import (
     BuildPFAES001Substation,
 )
-from power_fault_analyzer.diagram.model_document_export import render_engineering_svg
 from power_fault_analyzer.diagram.layout import Point
+from power_fault_analyzer.diagram.model_document_export import render_engineering_svg
 from power_fault_analyzer.diagram.model_projection import (
     project_network_to_diagram,
     validate_diagram_document,

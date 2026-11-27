@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QProcess
-
 from power_fault_analyzer.scripting.qt_worker import ScriptWorkerController
+
+from PySide6.QtCore import QProcess
 
 
 _INFINITE_SCRIPT = "while True:\n    pass\n"

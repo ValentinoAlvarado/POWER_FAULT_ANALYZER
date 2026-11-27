@@ -131,3 +131,26 @@ def test_unresolved_load_and_compensation_symbols_render_with_visible_badges():
     painter.end()
     assert not image.isNull()
     assert not scene.itemsBoundingRect().isEmpty()
+
+
+def test_unresolved_line_branch_keeps_state_badge_inside_qt_geometry():
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QApplication, QGraphicsScene
+    from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import BranchSymbol
+
+    _application(QApplication)
+    scene = QGraphicsScene()
+    branch = BranchSymbol(
+        uuid4(), "LINE-PENDING", QPointF(0.0, -80.0), QPointF(0.0, 80.0),
+        "", state="unresolved",
+    )
+    assert branch.boundingRect().left() <= -29.0
+    assert branch.boundingRect().right() >= 0.0
+    scene.addItem(branch)
+    image = QImage(240, 240, QImage.Format.Format_ARGB32)
+    image.fill(0xFFFFFFFF)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+    assert not image.isNull()

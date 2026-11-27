@@ -34,6 +34,11 @@ from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import
 from power_fault_analyzer.equipment.switching.switching_device import SwitchingDevice
 
 
+def _assert_no_label_collisions(document) -> None:
+    collisions = [item for item in document.diagnostics if item.startswith("LABEL_COLLISION:")]
+    assert collisions == []
+
+
 def _build_three_feeder_bays() -> NetworkWorkspace:
     network = Network("Automatic three-feeder bay layout")
     nominal = Voltage.from_kv(13.8)
@@ -122,6 +127,7 @@ def test_reference_case_layout_keeps_explicit_terminal_integrity_and_svg_busbar(
     workspace = BuildReferenceNetworkTemplate().execute().workspace
     document = project_network_to_diagram(workspace)
     assert validate_diagram_document(workspace, document) == ()
+    _assert_no_label_collisions(document)
     assert len(document.buses) == 1
     assert document.buses[0].kind == "busbar"
     assert len(document.symbols) == 1
@@ -134,6 +140,7 @@ def test_pfa_es001_svg_preserves_physical_busbars_and_internal_connection_nodes(
     built = BuildPFAES001Substation().execute()
     document = project_network_to_diagram(built.workspace)
     assert validate_diagram_document(built.workspace, document) == ()
+    _assert_no_label_collisions(document)
     assert len(document.buses) == 8
     assert sum(item.kind == "busbar" for item in document.buses) == 2
     assert sum(item.kind == "connection_node" for item in document.buses) == 6

@@ -803,7 +803,7 @@ class BranchSymbol(QGraphicsPathItem):
     def boundingRect(self) -> QRectF:
         bounds = super().boundingRect()
         if self.state in {"unresolved", "partial-data"}:
-            bounds = bounds.united(QRectF(-24.0, -12.0, 18.0, 24.0))
+            bounds = bounds.united(QRectF(-30.0, -15.0, 30.0, 30.0))
         return bounds
 
     def paint(self, painter: QPainter, option, widget=None) -> None:

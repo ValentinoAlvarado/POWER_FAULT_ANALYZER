@@ -21,7 +21,6 @@ class ScriptWorkerController(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.process = QProcess(self)
-        self.process.started.connect(self._write_request)
         self.process.finished.connect(self._finished)
         self.process.errorOccurred.connect(self._process_error)
         self._request = b""
@@ -80,11 +79,6 @@ class ScriptWorkerController(QObject):
     def _kill_if_running(self) -> None:
         if self.process.state() != QProcess.ProcessState.NotRunning:
             self.process.kill()
-
-    def _write_request(self) -> None:
-        # Requests are transferred by file so frozen --windowed builds never
-        # depend on unavailable stdin/stdout console handles.
-        return
 
     def _process_error(self, error) -> None:
         if self.process.state() == QProcess.ProcessState.NotRunning:

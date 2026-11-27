@@ -1427,6 +1427,11 @@ class WorkbenchWindow(QMainWindow):
         x = anchor_x - definition.hotspot.x
         y = anchor_y - definition.hotspot.y
         placement = DiagramSymbolPlacement.create(asset_id, x, y, rotation_deg)
+        # Explicit insertion must reveal the drawing-only layer before the new
+        # graphics item is created; QGraphicsScene cannot select hidden items.
+        # Keep the menu action and canvas layer state synchronized.
+        if not self.show_source_candidates_action.isChecked():
+            self.show_source_candidates_action.setChecked(True)
         self._undo_stack.push(_AddDiagramSymbolCommand(self, placement, definition))
         self.canvas.setFocus()
         self.statusBar().showMessage(

@@ -1046,20 +1046,15 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
                 "the current symbol projection requires an explicitly documented symbol mapping."
             )
 
-        placement = placements_by_equipment.get(equipment.id)
-        if placement is not None:
-            center = Point(placement.x, placement.y)
-            orientation = placement.rotation_deg
-            if len(terminals) == 1:
-                terminal_points = (_transform_local(center, terminal_local, orientation),)
-            elif len(definition.terminals) == len(terminals):
-                terminal_points = tuple(
-                    _transform_local(center, (item.x, item.y), orientation)
-                    for item in definition.terminals
-                )
-        elif equipment.id in workspace.diagram_positions:
+        # QET source placements are a separate drawing overlay with their own
+        # origin and pin geometry. They may provide a user-facing label, but they
+        # must never redefine the canonical electrical symbol's center, axis or
+        # terminal coordinates. Only explicit domain-element diagram_positions
+        # override the topology-derived canonical equipment geometry.
+        if equipment.id in workspace.diagram_positions:
             x, y = workspace.diagram_positions[equipment.id]
             center = Point(x, y)
+            orientation = workspace.diagram_rotations.get(equipment.id, orientation)
             if len(terminals) == 1:
                 terminal_points = (_transform_local(center, terminal_local, orientation),)
             elif len(definition.terminals) == len(terminals):

@@ -287,7 +287,7 @@ def _busbar_length(terminal_count: int) -> float:
     """Size a busbar from its explicit terminal incidence and bay count."""
     if terminal_count < 0:
         raise ValueError("terminal_count cannot be negative")
-    return 220.0 + max(0, terminal_count - 1) * 110.0
+    return 220.0 + max(0, terminal_count - 1) * 180.0
 
 
 def _automatic_bus_layout(network: Network, grid: float):
@@ -653,7 +653,7 @@ def _terminal_bus_taps(
                 # symbols; only constrained/manual bar overlaps relax it.
                 already_used = occupied[first_bus.bus_id] + occupied[second_bus.bus_id]
                 chosen = next((value for value in candidates
-                               if all(abs(value - used) >= 120.0 - 1e-7
+                               if all(abs(value - used) >= max(120.0, _estimated_label_width(equipment.name)) - 1e-7
                                       for used in already_used)), None)
                 if chosen is None:
                     chosen = next((value for value in candidates
@@ -940,11 +940,11 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
     for bus in buses:
         if bus.kind == "connection_node":
             name_position = Point(bus.center.x, bus.center.y - 18.0)
-            voltage_position = Point(bus.center.x, bus.center.y + 30.0)
+            voltage_position = Point(bus.center.x, bus.center.y + 48.0)
             name_anchor = voltage_anchor = "middle"
         elif abs(bus.orientation_deg % 180.0) < 1e-6:
             name_position = Point(bus.center.x, bus.center.y - 20.0)
-            voltage_position = Point(bus.center.x, bus.center.y + 30.0)
+            voltage_position = Point(bus.center.x, bus.center.y + 48.0)
             name_anchor = voltage_anchor = "middle"
         else:
             label_x = bus.center.x - bus.bounds.width / 2.0 - 14.0

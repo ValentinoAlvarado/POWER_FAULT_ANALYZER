@@ -325,8 +325,9 @@ class CanonicalEquipmentSymbol(QGraphicsObject):
             "disconnector": 4.5 * LABEL_SCENE_UNITS_PER_PT,
             "earthing_switch": 11.0 * LABEL_SCENE_UNITS_PER_PT,
         }.get(self.family, 8.0)
-        local_half_width = self.width / 2.0 + max(8.0, switch_extension)
-        local_half_height = self.height / 2.0 + 8.0
+        status_extension = 24.0 if self.state in {"unresolved", "partial-data"} else 8.0
+        local_half_width = self.width / 2.0 + max(8.0, switch_extension, status_extension)
+        local_half_height = self.height / 2.0 + max(8.0, status_extension)
         half_width = (
             abs(math.cos(angle)) * local_half_width
             + abs(math.sin(angle)) * local_half_height

@@ -1050,7 +1050,9 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
         if placement is not None:
             center = Point(placement.x, placement.y)
             orientation = placement.rotation_deg
-            if len(definition.terminals) == len(terminals):
+            if len(terminals) == 1:
+                terminal_points = (_transform_local(center, terminal_local, orientation),)
+            elif len(definition.terminals) == len(terminals):
                 terminal_points = tuple(
                     _transform_local(center, (item.x, item.y), orientation)
                     for item in definition.terminals
@@ -1058,7 +1060,9 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
         elif equipment.id in workspace.diagram_positions:
             x, y = workspace.diagram_positions[equipment.id]
             center = Point(x, y)
-            if len(definition.terminals) == len(terminals):
+            if len(terminals) == 1:
+                terminal_points = (_transform_local(center, terminal_local, orientation),)
+            elif len(definition.terminals) == len(terminals):
                 terminal_points = tuple(
                     _transform_local(center, (item.x, item.y), orientation)
                     for item in definition.terminals

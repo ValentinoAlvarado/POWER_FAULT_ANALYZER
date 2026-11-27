@@ -95,6 +95,7 @@ _DEFINITIONS = (
         "PFA-SLD-LOAD-001", "load", 52.0, 52.0,
         (SymbolTerminal("LOAD", 0.0, -26.0),),
         "Distinct static load marker with a circular demand symbol and P/Q glyph.",
+        standard_reference="PFA original symbol — IEC 60617 cross-reference pending",
         primitives=(SymbolPrimitive("circle", (0.0, 0.0, 19.0)),),
         text_glyph="P/Q",
     ),
@@ -102,6 +103,7 @@ _DEFINITIONS = (
         "PFA-SLD-CAPACITOR-001", "capacitor", 48.0, 56.0,
         (SymbolTerminal("LINE", 0.0, -28.0),),
         "Shunt capacitor with separated plate lines and an explicit unresolved state marker when data are missing.",
+        standard_reference="PFA original symbol — IEC 60617 cross-reference pending",
         primitives=(
             SymbolPrimitive("line", (0.0, -28.0, 0.0, -4.0)),
             SymbolPrimitive("line", (-17.0, -3.0, 17.0, -3.0)),
@@ -113,6 +115,7 @@ _DEFINITIONS = (
         "PFA-SLD-REACTOR-001", "reactor", 52.0, 64.0,
         (SymbolTerminal("LINE", 0.0, -32.0),),
         "Shunt reactor represented by a vertical inductive coil and terminal stem.",
+        standard_reference="PFA original symbol — IEC 60617 cross-reference pending",
         primitives=(
             SymbolPrimitive("line", (0.0, -32.0, 0.0, -22.0)),
             SymbolPrimitive("circle", (0.0, -15.0, 7.0)),
@@ -126,6 +129,7 @@ _DEFINITIONS = (
         "PFA-SLD-COMPENSATION-001", "compensation", 52.0, 52.0,
         (SymbolTerminal("LINE", 0.0, -26.0),),
         "Generic reactive compensation unit shown as a diamond and Q glyph; subtype remains explicit in metadata.",
+        standard_reference="PFA original symbol — IEC 60617 cross-reference pending",
         primitives=(
             SymbolPrimitive("line", (0.0, -22.0, 22.0, 0.0)),
             SymbolPrimitive("line", (22.0, 0.0, 0.0, 22.0)),

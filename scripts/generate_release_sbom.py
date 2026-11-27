@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import importlib.metadata as metadata
+from importlib import metadata
 import json
 import re
-import sys
 import uuid
 from pathlib import Path
 
@@ -54,7 +53,7 @@ def main() -> int:
 
     components.sort(key=lambda item: (item["name"].lower(), item["version"]))
     root_ref = f"pkg:generic/POWER_FAULT_ANALYZER@{args.version}"
-    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    now = dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     bom = {
         "bomFormat": "CycloneDX",
         "specVersion": "1.6",

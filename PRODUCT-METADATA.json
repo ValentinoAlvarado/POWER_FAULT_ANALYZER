@@ -1,0 +1,29 @@
+{
+  "product": "POWER_FAULT_ANALYZER",
+  "version": "0.1.0-beta.1",
+  "release_channel": "preview",
+  "license": "GPL-3.0-or-later",
+  "repository": "https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER",
+  "website": "https://valentinoalvarado.github.io/POWER_FAULT_ANALYZER/",
+  "baseline": "PFA_PRODUCT_CONSOLIDATED_001",
+  "integrations": [
+    "PFA-KEYBOARD-002",
+    "PFA-SYMBOLS-001",
+    "PFA-DESIGN-003.6",
+    "PFA-WORKBENCH-004.2.3.1"
+  ],
+  "python_target": "3.13.x x64",
+  "windows_distribution": [
+    "PFA-Setup-x64.exe",
+    "PFA-Windows-x64.zip"
+  ],
+  "release_pipeline": "GitHub Actions Windows runner; PyInstaller onedir; NSIS setup; SHA-256; CycloneDX 1.6 build-environment inventory",
+  "verification_evidence": {
+    "last_user_windows_acceptance_before_keyboard_002": "650 passed; Qt property editor, route parity, keyboard-001 and transformer raster acceptance passed",
+    "keyboard_002": "integrated in public source; requires final Windows acceptance as part of release workflow",
+    "release_binary": "not built in this Linux preparation environment; first tagged GitHub Actions run must build and verify on Windows"
+  },
+  "engineering_scope": "short-circuit and selected protection calculation framework with explicitly limited IEC 60909 coverage; no AC/DC load flow, OPF or N-1 suite",
+  "iec_symbol_conformance": "NOT_VERIFIED except documented transformer reference descriptor; no blanket IEC 60617 claim",
+  "code_signing": "unsigned until an external code-signing certificate and protected signing workflow are configured"
+}

@@ -17,54 +17,118 @@ function Invoke-Checked {
     }
 }
 
+$BootstrapPython = $env:pythonLocation
+if (-not [string]::IsNullOrWhiteSpace($BootstrapPython)) {
+    $BootstrapPython = Join-Path $BootstrapPython 'python.exe'
+    if (-not (Test-Path -LiteralPath $BootstrapPython -PathType Leaf)) {
+        throw "setup-python interpreter not found: $BootstrapPython"
+    }
+}
+else {
+    $BootstrapPython = (Get-Command python -ErrorAction Stop).Source
+}
+
 $Python = Join-Path $RepositoryRoot '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $Python)) {
-    $Python = (Get-Command python -ErrorAction Stop).Source
+if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    Write-Host 'Creating isolated release virtual environment...'
+    & $BootstrapPython -m venv (Join-Path $RepositoryRoot '.venv')
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to create the release virtual environment.' }
+}
+if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    throw "Release interpreter missing: $Python"
 }
 $pythonVersion = & $Python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-if ($LASTEXITCODE -ne 0) { throw 'Unable to identify the selected Python interpreter.' }
-if ($pythonVersion -ne '3.13') {
-    throw "Release build requires Python 3.13; detected $pythonVersion."
+if ($LASTEXITCODE -ne 0 -or $pythonVersion -ne '3.13') {
+    throw "Release requires Python 3.13; detected $pythonVersion."
+}
+$pythonArch = & $Python -c "import struct; print(struct.calcsize('P') * 8)"
+if ($LASTEXITCODE -ne 0 -or $pythonArch -ne '64') {
+    throw "Release requires 64-bit Python; detected $pythonArch-bit."
 }
 
-$projectLicense = Join-Path $RepositoryRoot 'LICENSE'
-if (-not (Test-Path $projectLicense) -or (Get-Item $projectLicense).Length -eq 0) {
-    throw 'Release blocked: the root LICENSE file is empty. Select and publish the project license and review Qt/PySide6 redistribution obligations before producing a public binary.'
-}
-
+$license = Join-Path $RepositoryRoot 'LICENSE'
+$notice = Join-Path $RepositoryRoot 'NOTICE.md'
+$licenseDirectory = Join-Path $RepositoryRoot 'LICENSES'
 $manifest = Join-Path $RepositoryRoot 'RESEARCH\qelectrotech-symbol-candidates.csv'
 $assetRoot = Join-Path $RepositoryRoot 'assets\third_party\qelectrotech-elements'
-if (-not (Test-Path $manifest)) { throw "Missing pinned QET manifest: $manifest" }
-if (-not (Test-Path (Join-Path $assetRoot 'ELEMENTS.LICENSE'))) {
+foreach ($required in @($license, $notice, $manifest)) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+        throw "Required release input is missing: $required"
+    }
+}
+if ((Get-Item -LiteralPath $license).Length -lt 30000) {
+    throw 'Root LICENSE is incomplete; expected the complete GPL-3.0 text and project notice.'
+}
+if (-not (Test-Path -LiteralPath $licenseDirectory -PathType Container)) {
+    throw 'LICENSES directory is required for third-party redistribution notices.'
+}
+if (-not (Test-Path -LiteralPath (Join-Path $assetRoot 'ELEMENTS.LICENSE'))) {
     & (Join-Path $PSScriptRoot 'Acquire-QElectroTechSymbolSeed.ps1') -RepositoryRoot $RepositoryRoot
-    if ($LASTEXITCODE -ne 0) { throw 'QET source seed acquisition failed.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Pinned QElectroTech symbol acquisition failed.' }
 }
 
-Invoke-Checked 'Install release dependencies' { & $Python -m pip install -e '.[dev,desktop,reports,release]' }
+$releaseVersion = $env:PFA_RELEASE_VERSION
+if ([string]::IsNullOrWhiteSpace($releaseVersion)) {
+    $toml = Get-Content (Join-Path $RepositoryRoot 'pyproject.toml') -Raw
+    $match = [regex]::Match($toml, '(?m)^version\s*=\s*"([^"]+)"')
+    if (-not $match.Success) { throw 'Could not read project version from pyproject.toml.' }
+    $releaseVersion = "v$($match.Groups[1].Value)"
+}
+$displayVersion = $releaseVersion.Trim()
+if ($displayVersion.StartsWith('v')) { $displayVersion = $displayVersion.Substring(1) }
+
+Invoke-Checked 'Install exact project release dependencies' {
+    & $Python -m pip install --upgrade pip
+    if ($LASTEXITCODE -ne 0) { throw 'pip upgrade failed.' }
+    & $Python -m pip install -e '.[dev,desktop,reports,release]'
+}
+
 if (-not $SkipTests) {
-    Invoke-Checked 'Complete APP-REBOOT-005 quality and desktop acceptance gates' {
+    Invoke-Checked 'Ruff source and test checks' {
+        & $Python -m ruff check src tests examples
+    }
+    Invoke-Checked 'Compile source, tests, examples and scripts' {
+        & $Python -m compileall -q src tests examples scripts
+    }
+    Invoke-Checked 'Complete pytest suite' {
+        & $Python -m pytest -q
+    }
+    Invoke-Checked 'APP-REBOOT-005 desktop, QElectroTech and Qt acceptance' {
         & (Join-Path $PSScriptRoot 'verify_app_reboot_005.ps1')
     }
 }
 
 $distRoot = Join-Path $RepositoryRoot 'dist'
+$appFolder = Join-Path $distRoot 'POWER_FAULT_ANALYZER'
 $workPath = Join-Path $distRoot 'pyinstaller-work'
 $specPath = Join-Path $distRoot 'pyinstaller-spec'
 New-Item -ItemType Directory -Force -Path $distRoot | Out-Null
+foreach ($generated in @($appFolder, $workPath, $specPath)) {
+    if (Test-Path -LiteralPath $generated) {
+        Remove-Item -LiteralPath $generated -Recurse -Force
+    }
+}
 
-Invoke-Checked 'Build standalone Windows application' {
+Invoke-Checked 'Build standalone Windows x64 desktop application' {
     & $Python -m PyInstaller --noconfirm --clean --windowed --onedir `
         --name POWER_FAULT_ANALYZER `
         --paths src `
         --collect-all PySide6 `
+        --collect-all shiboken6 `
         --collect-all numpy `
         --collect-all scipy `
         --collect-all pandas `
         --collect-all networkx `
+        --collect-all pydantic `
+        --collect-all pint `
         --collect-all reportlab `
         --collect-all openpyxl `
         --collect-all matplotlib `
         --collect-all pyqtgraph `
+        --collect-all qtawesome `
+        --collect-all cairosvg `
+        --collect-all cairocffi `
+        --collect-data power_fault_analyzer `
         --add-data "$manifest;RESEARCH" `
         --add-data "$assetRoot;assets/third_party/qelectrotech-elements" `
         --workpath $workPath `
@@ -72,20 +136,75 @@ Invoke-Checked 'Build standalone Windows application' {
         src/power_fault_analyzer/interfaces/desktop/app.py
 }
 
-$appFolder = Join-Path $distRoot 'POWER_FAULT_ANALYZER'
-if (-not (Test-Path (Join-Path $appFolder 'POWER_FAULT_ANALYZER.exe'))) {
-    throw 'PyInstaller completed without the expected executable.'
+$executable = Join-Path $appFolder 'POWER_FAULT_ANALYZER.exe'
+if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+    throw 'PyInstaller completed without POWER_FAULT_ANALYZER.exe.'
 }
-Copy-Item LICENSE $appFolder -Force
-Copy-Item README.md $appFolder -Force
-Copy-Item docs/engineering/THIRD_PARTY_LICENSE_REGISTER.md $appFolder -Force
+if (-not $SkipTests) {
+    Invoke-Checked 'Frozen Windows executable startup acceptance' {
+        & (Join-Path $PSScriptRoot 'verify_frozen_windows_app.ps1') -Executable $executable
+    }
+}
+
+Copy-Item -LiteralPath $license -Destination $appFolder -Force
+Copy-Item -LiteralPath $notice -Destination $appFolder -Force
+Copy-Item -LiteralPath (Join-Path $RepositoryRoot 'README.md') -Destination $appFolder -Force
+Copy-Item -LiteralPath (Join-Path $RepositoryRoot 'docs/engineering/THIRD_PARTY_LICENSE_REGISTER.md') -Destination $appFolder -Force
+$packagedLicenseDirectory = Join-Path $appFolder 'LICENSES'
+New-Item -ItemType Directory -Force -Path $packagedLicenseDirectory | Out-Null
+Copy-Item -Path (Join-Path $licenseDirectory '*') -Destination $packagedLicenseDirectory -Recurse -Force
 
 $releaseDirectory = Join-Path $RepositoryRoot $OutputDirectory
 New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
+$thirdPartyNotices = Join-Path $releaseDirectory 'THIRD_PARTY_NOTICES.md'
+Copy-Item -LiteralPath (Join-Path $RepositoryRoot 'docs/engineering/THIRD_PARTY_LICENSE_REGISTER.md') -Destination $thirdPartyNotices -Force
+
+Invoke-Checked 'Generate CycloneDX dependency inventory' {
+    & $Python (Join-Path $PSScriptRoot 'generate_release_sbom.py') --output (Join-Path $releaseDirectory 'SBOM.cdx.json') --version $displayVersion
+}
+Invoke-Checked 'Generate exact Python dependency license inventory' {
+    & $Python (Join-Path $PSScriptRoot 'generate_python_license_report.py') --output (Join-Path $releaseDirectory 'PYTHON-DEPENDENCY-LICENSES.md')
+}
+Copy-Item -LiteralPath (Join-Path $releaseDirectory 'SBOM.cdx.json') -Destination $appFolder -Force
+Copy-Item -LiteralPath (Join-Path $releaseDirectory 'PYTHON-DEPENDENCY-LICENSES.md') -Destination $appFolder -Force
+Copy-Item -LiteralPath $thirdPartyNotices -Destination $appFolder -Force
+
+$gitCommit = 'unknown'
+$gitOutput = & git -C $RepositoryRoot rev-parse HEAD 2>$null
+if ($LASTEXITCODE -eq 0 -and $gitOutput) { $gitCommit = ([string]$gitOutput).Trim() }
+$buildInfo = [ordered]@{
+    product = 'POWER_FAULT_ANALYZER'
+    version = $displayVersion
+    python = (& $Python --version 2>&1 | Out-String).Trim()
+    architecture = 'x64'
+    license = 'GPL-3.0-or-later'
+    git_commit = $gitCommit
+    built_utc = [DateTime]::UtcNow.ToString('o')
+    repository = 'https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER'
+    distribution = 'portable PyInstaller onedir ZIP; no installer executable is produced by this workflow'
+    artifacts = @('PFA-Windows-x64.zip', 'SHA256SUMS.txt', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json')
+}
+$buildInfoPath = Join-Path $releaseDirectory 'BUILD-INFO.json'
+$buildInfo | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $buildInfoPath -Encoding UTF8
+Copy-Item -LiteralPath $buildInfoPath -Destination $appFolder -Force
+
 $zipPath = Join-Path $releaseDirectory 'PFA-Windows-x64.zip'
-if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 Compress-Archive -Path (Join-Path $appFolder '*') -DestinationPath $zipPath -CompressionLevel Optimal
-$hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-"$hash  PFA-Windows-x64.zip" | Set-Content (Join-Path $releaseDirectory 'SHA256SUMS.txt') -Encoding ASCII
-Write-Host "Release bundle created: $zipPath" -ForegroundColor Green
-Write-Host "SHA-256: $hash"
+if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf) -or (Get-Item -LiteralPath $zipPath).Length -le 0) {
+    throw 'Portable Windows ZIP was not created or is empty.'
+}
+
+$hashLines = @()
+foreach ($fileName in @('PFA-Windows-x64.zip', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json')) {
+    $path = Join-Path $releaseDirectory $fileName
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release sidecar missing: $path" }
+    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hashLines += "$hash  $fileName"
+}
+$checksumPath = Join-Path $releaseDirectory 'SHA256SUMS.txt'
+$hashLines | Set-Content -LiteralPath $checksumPath -Encoding ASCII
+
+Write-Host "Portable Windows package: $zipPath" -ForegroundColor Green
+Write-Host "Release sidecars: $releaseDirectory" -ForegroundColor Green
+Write-Host 'No NSIS installer is generated by this portable-ZIP release workflow.' -ForegroundColor Yellow

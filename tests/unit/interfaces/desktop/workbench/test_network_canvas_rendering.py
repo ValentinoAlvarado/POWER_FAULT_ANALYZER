@@ -137,6 +137,7 @@ def test_unresolved_line_branch_keeps_state_badge_inside_qt_geometry():
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QImage, QPainter
     from PySide6.QtWidgets import QApplication, QGraphicsScene
+
     from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import BranchSymbol
 
     _application(QApplication)

@@ -89,7 +89,7 @@ def _page_size(document) -> tuple[float, float]:
 
 def _render_qt(workspace: NetworkWorkspace, output: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QPoint, Qt
     from PySide6.QtGui import QImage, QPainter
     from PySide6.QtWidgets import QApplication
 
@@ -107,7 +107,7 @@ def _render_qt(workspace: NetworkWorkspace, output: Path) -> None:
     image = QImage(1800, 1200, QImage.Format.Format_ARGB32_Premultiplied)
     image.fill(0xFFFFFFFF)
     painter = QPainter(image)
-    view.viewport().render(painter)
+    view.viewport().render(painter, QPoint())
     painter.end()
     if image.isNull() or not image.save(str(output), "PNG"):
         raise RuntimeError(f"Qt review image could not be written: {output}")

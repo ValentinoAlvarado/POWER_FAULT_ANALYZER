@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - "fix/portable-code-automation-worker"
-  push:
     tags:
       - "v*"
 
@@ -111,7 +110,6 @@ jobs:
             dist/release/PYTHON-DEPENDENCY-LICENSES.md
             dist/release/THIRD_PARTY_NOTICES.md
             dist/release/BUILD-INFO.json
-            dist/release/Update-PFA-Portable.ps1
             dist/release/Update-PFA-Portable.ps1
 
       - name: Publish GitHub Release assets

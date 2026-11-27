@@ -540,19 +540,21 @@ def _layout_equipment_label(
 
 
 def _equipment_center_for_single_terminal(
-    family: str, bus: EngineeringBus, tap: Point,
+    family: str, bus: EngineeringBus, tap: Point, *, clearance: float | None = None,
 ) -> Point:
     """Place a one-terminal device directly above/below its reserved bus tap."""
     if abs(bus.orientation_deg % 180.0) < 1e-6:
         # A shunt bay occupies the adjacent vertical corridor.  Do not place it
         # beyond half the busbar length: doing so can overlap the next bus row.
-        y = bus.center.y - 130.0 if family == "source" else bus.center.y + 140.0
+        offset = 72.0 if clearance is None else clearance
+        y = bus.center.y - offset if family == "source" else bus.center.y + offset
         return Point(tap.x, y)
     half_bus_extent_x = bus.bounds.width / 2.0
+    offset = 70.0 if clearance is None else clearance
     x = (
-        bus.center.x - half_bus_extent_x - 70.0
+        bus.center.x - half_bus_extent_x - offset
         if family == "source"
-        else bus.center.x + half_bus_extent_x + 70.0
+        else bus.center.x + half_bus_extent_x + offset
     )
     return Point(x, tap.y)
 
@@ -954,6 +956,20 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
     terminal_bus_taps = _terminal_bus_taps(
         network, bus_by_identifier, preferred_equipment_positions
     )
+    manually_positioned_equipment = set(workspace.diagram_positions) | set(placements_by_equipment)
+    for equipment in network.equipment:
+        terminals = tuple(equipment.terminals)
+        if len(terminals) != 2 or equipment.id in manually_positioned_equipment:
+            continue
+        first_tap = terminal_bus_taps[terminals[0].id]
+        second_tap = terminal_bus_taps[terminals[1].id]
+        center, orientation = automatic_equipment_layout.get(equipment.id, (None, 0.0))
+        if center is None:
+            continue
+        if abs(first_tap.x - second_tap.x) < 1e-6 and abs(abs(orientation) - 90.0) < 1e-6:
+            automatic_equipment_layout[equipment.id] = (Point(first_tap.x, center.y), orientation)
+        elif abs(first_tap.y - second_tap.y) < 1e-6 and abs(orientation % 180.0) < 1e-6:
+            automatic_equipment_layout[equipment.id] = (Point((first_tap.x + second_tap.x) / 2.0, first_tap.y), orientation)
     symbols: list[EngineeringSymbol] = []
     conductors: list[EngineeringConductor] = []
     labels: list[EngineeringLabel] = []
@@ -999,7 +1015,9 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
         if len(terminals) == 1:
             bus = bus_by_identifier[connected_buses[0]]
             tap = terminal_bus_taps[terminals[0].id]
-            center = _equipment_center_for_single_terminal(family, bus, tap)
+            center = _equipment_center_for_single_terminal(
+                family, bus, tap, clearance=130.0
+            )
             direction = -1.0 if family == "source" else 1.0
             if abs(bus.orientation_deg % 180.0) < 1e-6:
                 terminal_local = (
@@ -1032,17 +1050,19 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
         if placement is not None:
             center = Point(placement.x, placement.y)
             orientation = placement.rotation_deg
-            terminal_points = tuple(
-                _transform_local(center, (item.x, item.y), orientation)
-                for item in definition.terminals
-            )
+            if len(definition.terminals) == len(terminals):
+                terminal_points = tuple(
+                    _transform_local(center, (item.x, item.y), orientation)
+                    for item in definition.terminals
+                )
         elif equipment.id in workspace.diagram_positions:
             x, y = workspace.diagram_positions[equipment.id]
             center = Point(x, y)
-            terminal_points = tuple(
-                _transform_local(center, (item.x, item.y), orientation)
-                for item in definition.terminals
-            )
+            if len(definition.terminals) == len(terminals):
+                terminal_points = tuple(
+                    _transform_local(center, (item.x, item.y), orientation)
+                    for item in definition.terminals
+                )
 
         symbols.append(EngineeringSymbol(
             equipment.id, equipment.name, family, center, width, height,

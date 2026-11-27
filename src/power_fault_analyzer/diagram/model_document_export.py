@@ -109,7 +109,6 @@ def render_engineering_svg(
             tuple(str(identifier) for identifier in item.terminal_ids),
             definition.standard_reference, definition.normative_status,
             definition.provenance, definition.source_license, definition.definition_hash,
-            item.state,
             item.state if item.state in {"unresolved", "partial-data"} else "resolved",
         ))
     # Connection markers are rendered at the explicit model-to-busbar tap points.

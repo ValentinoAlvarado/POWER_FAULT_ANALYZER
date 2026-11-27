@@ -99,7 +99,7 @@ def execute_request(request: dict) -> dict:
 def _execute_to_response_file(request_path: str, response_path: str) -> int:
     """Execute one request and persist exactly one JSON response without stdio."""
     try:
-        request = json.loads(Path(request_path).read_text(encoding="utf-8"))
+        request = json.loads(Path(request_path).read_text(encoding="utf-8-sig"))
         result = execute_request(request)
         exit_code = 0
     except Exception as exc:  # noqa: BLE001 - serialize ordinary worker failures

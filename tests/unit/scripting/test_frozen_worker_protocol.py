@@ -43,11 +43,11 @@ def test_file_protocol_serializes_script_errors_without_console_streams(tmp_path
 def test_worker_captures_print_output() -> None:
     result = execute_request({
         "source": (
-            'project = ScriptProject("Captured output test")\\n'
-            'project.add_bus("BUS-01", voltage_kv=13.8)\\n'
-            'print("PFA automation output")\\n'
+            'project = ScriptProject("Captured output test")\n'
+            'project.add_bus("BUS-01", voltage_kv=13.8)\n'
+            'print("PFA automation output")\n'
         )
     })
 
     assert result["ok"] is True
-    assert result["captured_output"] == "PFA automation output\\n"
+    assert result["captured_output"] == "PFA automation output\n"

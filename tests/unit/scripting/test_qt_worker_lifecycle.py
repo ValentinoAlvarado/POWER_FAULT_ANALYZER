@@ -5,11 +5,11 @@ from PySide6.QtCore import QProcess
 from power_fault_analyzer.scripting.qt_worker import ScriptWorkerController
 
 
-_INFINITE_SCRIPT = "while True:\\n    pass\\n"
+_INFINITE_SCRIPT = "while True:\n    pass\n"
 _MINIMAL_SCRIPT = (
-    'project = ScriptProject("Qt worker lifecycle test")\\n'
-    'project.add_bus("BUS-01", voltage_kv=13.8)\\n'
-    'workspace = project.render()\\n'
+    'project = ScriptProject("Qt worker lifecycle test")\n'
+    'project.add_bus("BUS-01", voltage_kv=13.8)\n'
+    'workspace = project.render()\n'
 )
 
 

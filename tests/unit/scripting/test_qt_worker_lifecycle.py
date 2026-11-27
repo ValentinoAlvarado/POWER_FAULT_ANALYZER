@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-_INFINITE_SCRIPT = "while True:\\n    pass\\n"
-_MINIMAL_SCRIPT = (
-    'project = ScriptProject("Qt worker lifecycle test")\\n'
-    'project.add_bus("BUS-01", voltage_kv=13.8)\\n'
-    'workspace = project.render()\\n'
-)
+_INFINITE_SCRIPT = chr(10).join(("while True:", "    pass", ""))
+_MINIMAL_SCRIPT = chr(10).join((
+    'project = ScriptProject("Qt worker lifecycle test")',
+    'project.add_bus("BUS-01", voltage_kv=13.8)',
+    "workspace = project.render()",
+    "",
+))
 
 
 def test_qt_worker_timeout_terminates_process_and_releases_resources(qtbot) -> None:
@@ -42,13 +43,21 @@ def test_qt_worker_cancel_stops_termination_timer_before_next_run(qtbot) -> None
     controller.cancel()
     qtbot.waitUntil(lambda: len(failures) == 1, timeout=5_000)
 
-    assert "cancelled" in failures[0].lower()
+    assert failures == ["Script execution cancelled."]
     assert not controller._termination_timer.isActive()
+    assert not controller._timeout_timer.isActive()
     assert controller._temporary_directory is None
 
     controller.start(_MINIMAL_SCRIPT)
-    qtbot.waitUntil(lambda: len(results) == 1, timeout=5_000)
+    qtbot.waitUntil(
+        lambda: bool(results) or len(failures) > 1,
+        timeout=5_000,
+    )
 
+    assert len(failures) == 1, f"Second worker run failed: {failures[1:]}"
+    assert len(results) == 1
     assert results[0]["project_name"] == "Qt worker lifecycle test"
     assert controller.process.state() == controller.process.ProcessState.NotRunning
     assert not controller._termination_timer.isActive()
+    assert not controller._timeout_timer.isActive()
+    assert controller._temporary_directory is None

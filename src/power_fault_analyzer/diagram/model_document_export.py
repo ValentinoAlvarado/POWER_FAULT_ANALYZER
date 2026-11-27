@@ -95,7 +95,7 @@ def render_engineering_svg(
         definition = get_symbol_definition(family)
         symbols.append(SvgSymbol(
             family, item.center, item.bounds.width, item.bounds.height,
-            str(item.bus_id), orientation_deg=item.orientation_deg,
+            str(item.bus_id), orientation_deg=0.0,
             symbol_id=definition.symbol_id, standard_reference=definition.standard_reference,
             normative_status=definition.normative_status, provenance=definition.provenance,
             source_license=definition.source_license, definition_hash=definition.definition_hash,
@@ -110,6 +110,7 @@ def render_engineering_svg(
             definition.standard_reference, definition.normative_status,
             definition.provenance, definition.source_license, definition.definition_hash,
             item.state,
+            item.state if item.state in {"unresolved", "partial-data"} else "resolved",
         ))
     # Connection markers are rendered at the explicit model-to-busbar tap points.
     junction_seen: set[tuple[float, float]] = set()

@@ -189,3 +189,32 @@ def test_load_and_compensation_families_have_distinct_glyphs_and_unresolved_stat
     assert 'data-family="reactor" data-model-state="unresolved"' in svg
     assert 'data-family="compensation" data-model-state="unresolved"' in svg
     assert "Equipment parameters unresolved" in svg
+
+
+def test_rotated_busbar_bounds_are_not_rotated_twice_in_svg():
+    source = BuildReferenceNetworkTemplate().execute().workspace
+    bus = source.network.buses[0]
+    workspace = NetworkWorkspace(
+        network=source.network,
+        diagram_positions=dict(source.diagram_positions),
+        diagram_rotations={bus.id: 90.0},
+        grid_spacing=source.grid_spacing,
+        snap_enabled=source.snap_enabled,
+    )
+    document = project_network_to_diagram(workspace)
+    projected_bus = document.buses[0]
+    assert projected_bus.bounds.height > projected_bus.bounds.width
+    svg = render_engineering_svg(document)
+    bus_group = svg.split(f'id="equipment-{bus.id}"', 1)[1].split("</g>", 1)[0]
+    assert 'transform="translate(' in bus_group
+    assert 'rotate(0)' in bus_group
+
+
+def test_svg_model_state_is_separate_from_switch_operating_position():
+    workspace = _build_resolved_and_unresolved_shunts()
+    document = project_network_to_diagram(workspace)
+    svg = render_engineering_svg(document)
+    switch = next(item for item in document.symbols if item.name == "CB-RESOLVED")
+    group = svg.split(f'id="equipment-{switch.equipment_id}"', 1)[1].split("</g>", 1)[0]
+    assert 'data-model-state="resolved"' in group
+    assert switch.state == "closed"

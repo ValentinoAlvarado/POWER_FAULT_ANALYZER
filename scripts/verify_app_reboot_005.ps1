@@ -9,6 +9,15 @@ if (-not (Test-Path -LiteralPath $Python)) {
 }
 Set-Location $RepositoryRoot
 
+function Invoke-Checked {
+    param([string]$Name, [scriptblock]$Command)
+    Write-Host "== $Name ==" -ForegroundColor Cyan
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Name failed with exit code $LASTEXITCODE."
+    }
+}
+
 Write-Host '== Ruff, compilation, full test suite and pinned QET renderer ==' -ForegroundColor Cyan
 # The child PowerShell script performs explicit checks after each native Python
 # invocation and throws on failure. Do not inspect LASTEXITCODE after a .ps1 call.

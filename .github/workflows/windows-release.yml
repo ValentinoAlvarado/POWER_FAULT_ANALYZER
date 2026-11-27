@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - "fix/portable-code-automation-worker"
+      - "fix/diagram-auto-layout-r19"
     tags:
       - "v*"
 
@@ -111,6 +112,24 @@ jobs:
             dist/release/THIRD_PARTY_NOTICES.md
             dist/release/BUILD-INFO.json
             dist/release/Update-PFA-Portable.ps1
+      - name: Render SVG and Qt diagram acceptance gallery
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $python = '.venv\Scripts\python.exe'
+          if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw "Release Python not found: $python" }
+          & $python scripts\render_diagram_acceptance_gallery.py --output-dir artifacts\diagram-review
+          if ($LASTEXITCODE -ne 0) { throw "Diagram acceptance gallery failed with exit code $LASTEXITCODE." }
+
+      - name: Upload diagram review images and vector sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: PFA-Diagram-Review-${{ github.sha }}
+          if-no-files-found: error
+          path: artifacts/diagram-review/
 
       - name: Publish GitHub Release assets
         if: startsWith(github.ref, 'refs/tags/')

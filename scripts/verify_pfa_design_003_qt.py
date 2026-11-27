@@ -1,8 +1,9 @@
 """Windows Qt smoke test for the PFA-DESIGN-003 canonical engineering canvas."""
 from __future__ import annotations
 
-from pathlib import Path
+import itertools
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -12,9 +13,9 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QApplication
 
 from examples.canonical_model_scenarios import (
-    build_single_bus_substation,
     build_double_bus_substation,
     build_multibus_network,
+    build_single_bus_substation,
 )
 from power_fault_analyzer.diagram.model_projection import project_network_to_diagram
 from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import NetworkCanvasView
@@ -85,8 +86,10 @@ def main() -> int:
                 first, second = conductor.points[:2]
                 last, terminal = conductor.points[-2:]
                 bus = bus_by_id[str(conductor.bus_id)]
-                if abs(bus.orientation_deg % 180.0) < 1e-6:
-                    if abs(first.x - second.x) > 0.5 or abs(last.x - terminal.x) > 0.5:
+                if (
+                    abs(bus.orientation_deg % 180.0) < 1e-6
+                    and (abs(first.x - second.x) > 0.5 or abs(last.x - terminal.x) > 0.5)
+                ):
                         raise RuntimeError(
                             f"{name}: terminal {conductor.terminal_id} is not routed perpendicular to its busbar."
                         )
@@ -120,7 +123,7 @@ def main() -> int:
             elements = [path.elementAt(index) for index in range(path.elementCount())]
             points = [(item.x, item.y) for item in elements]
             if any(abs(x1 - x2) > 0.5 and abs(y1 - y2) > 0.5
-                   for (x1, y1), (x2, y2) in zip(points, points[1:])):
+                   for (x1, y1), (x2, y2) in itertools.pairwise(points)):
                 raise RuntimeError(f"{name}: dragged conductor {key} is not orthogonal.")
             if len(points) >= 2:
                 bus_id = canvas._terminal_route_specs[key][0]

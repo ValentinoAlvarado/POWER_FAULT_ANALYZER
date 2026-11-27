@@ -87,7 +87,10 @@ def test_canonical_qt_symbols_render_to_an_offscreen_scene_without_clipping():
     _application(QApplication)
 
     scene = QGraphicsScene()
-    families = ("circuit_breaker", "disconnector", "earthing_switch", "generic")
+    families = (
+        "circuit_breaker", "disconnector", "earthing_switch", "generic",
+        "load", "capacitor", "reactor", "compensation",
+    )
     for index, family in enumerate(families):
         item = CanonicalEquipmentSymbol(
             uuid4(), f"TEST-{family}", family, "open", 44.0, 32.0,
@@ -101,5 +104,30 @@ def test_canonical_qt_symbols_render_to_an_offscreen_scene_without_clipping():
     scene.render(painter)
     painter.end()
 
+    assert not image.isNull()
+    assert not scene.itemsBoundingRect().isEmpty()
+
+
+def test_unresolved_load_and_compensation_symbols_render_with_visible_badges():
+    (
+        QImage, QPainter, QApplication, QGraphicsScene, _, _, _,
+        CanonicalEquipmentSymbol, _,
+    ) = _qt_dependencies()
+    _application(QApplication)
+    scene = QGraphicsScene()
+    families = ("load", "capacitor", "reactor", "compensation")
+    for index, family in enumerate(families):
+        item = CanonicalEquipmentSymbol(
+            uuid4(), f"{family}-pending", family, "unresolved", 52.0, 64.0,
+        )
+        item.setPos(index * 150.0, 0.0)
+        scene.addItem(item)
+        assert item.boundingRect().right() >= 26.0 + 24.0
+        assert item.boundingRect().top() <= -32.0 - 24.0
+    image = QImage(720, 220, QImage.Format.Format_ARGB32)
+    image.fill(0xFFFFFFFF)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
     assert not image.isNull()
     assert not scene.itemsBoundingRect().isEmpty()

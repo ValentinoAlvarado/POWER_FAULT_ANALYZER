@@ -188,3 +188,21 @@ def test_script_api_builds_the_same_switch_and_unresolved_branch_domain_objects(
     kinds = {item["kind"] for item in result["document"]["network"]["equipment"]}
     assert kinds == {"switching_device", "unresolved_two_terminal_equipment"}
     assert len(result["document"]["network"]["connections"]) == 4
+
+
+def test_equipment_position_is_editable_and_persists_without_changing_connectivity(tmp_path):
+    repository = JSONNetworkDocumentRepository()
+    workspace = build_multibus_network()
+    equipment = next(item for item in workspace.network.equipment if len(item.terminals) == 2)
+    workspace.diagram_positions[equipment.id] = (880.0, 660.0)
+    before_connections = tuple(workspace.network.connections)
+    before = project_network_to_diagram(workspace)
+    projected = next(item for item in before.symbols if item.equipment_id == equipment.id)
+    assert projected.center.x == 880.0 and projected.center.y == 660.0
+    target = repository.save(workspace, tmp_path / "equipment-position.network.json")
+    reopened = repository.load(target)
+    after = project_network_to_diagram(reopened)
+    restored = next(item for item in after.symbols if item.equipment_id == equipment.id)
+    assert restored.center.x == 880.0 and restored.center.y == 660.0
+    assert tuple(reopened.network.connections) == before_connections
+    assert validate_diagram_document(reopened, after) == ()

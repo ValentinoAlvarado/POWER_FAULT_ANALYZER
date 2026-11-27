@@ -1,5 +1,6 @@
 """Windows Qt canvas smoke test for PFA-SYNC-001 canonical scenarios."""
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 

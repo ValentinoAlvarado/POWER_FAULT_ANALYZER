@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from itertools import pairwise
-import pytest
 from uuid import uuid4
+
+import pytest
 
 from examples.canonical_model_scenarios import build_multibus_network
 from power_fault_analyzer.application.use_cases.network_workspace import NetworkWorkspace

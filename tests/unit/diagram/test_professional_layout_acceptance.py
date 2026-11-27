@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from itertools import pairwise
+import pytest
 from uuid import uuid4
 
 from examples.canonical_model_scenarios import build_multibus_network

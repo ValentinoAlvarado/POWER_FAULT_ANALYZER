@@ -1373,6 +1373,11 @@ class WorkbenchWindow(QMainWindow):
                 self, "Code & Automation", "Script did not return a valid workspace."
             )
             return
+        if not self._confirm_discard():
+            self._log(
+                "Code & Automation result was not applied; the active project was preserved."
+            )
+            return
         self.project = self.services.project_workspace.create(workspace.network.name)
         self.project_path = None
         self.workspace = workspace

@@ -112,6 +112,9 @@ class CodeAutomationStudio(QWidget):
             f"Explicit connections: {len(network.connections)}\n"
             "Structural validation only; no electrical study was executed."
         )
+        captured_output = str(result.get("captured_output", "")).rstrip()
+        if captured_output:
+            summary += f"\n\nSCRIPT OUTPUT\n{captured_output}"
         self.output.setPlainText(summary)
         if self._mode == "build":
             self.workspace_built.emit(workspace)

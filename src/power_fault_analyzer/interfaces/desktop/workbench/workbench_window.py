@@ -1266,7 +1266,7 @@ class WorkbenchWindow(QMainWindow):
 
         self.main_splitter = _EngineeringSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.setObjectName("MainWorkspaceSplitter")
-        self.main_splitter.setHandleWidth(5)
+        self.main_splitter.setHandleWidth(9)
         self.main_splitter.setChildrenCollapsible(True)
         self.main_splitter.addWidget(self.explorer_panel)
         self.main_splitter.addWidget(self.workspace_tabs)
@@ -3499,7 +3499,7 @@ QLabel#QETLibraryStatus { color: #98A2B3; font-size: 8pt; }
 QToolButton#ProvenanceToggle { color: #475467; text-align: left; padding: 4px 2px; }
 QSplitter::handle { background: #E5EAF0; }
 QSplitter::handle:hover { background: #8AA5B7; }
-QSplitter::handle:horizontal { width: 5px; margin: 0 1px; }
+QSplitter::handle:horizontal { width: 9px; margin: 0 1px; }
 QSplitter::handle:vertical { height: 8px; margin: 1px 0; }
 """
 
@@ -3579,7 +3579,7 @@ QLabel#QETLibraryStatus { color: #A5B4C3; font-size: 8pt; }
 QToolButton#ProvenanceToggle { color: #A5B4C3; text-align: left; padding: 4px 2px; }
 QSplitter::handle { background: #354556; }
 QSplitter::handle:hover { background: #29B6D1; }
-QSplitter::handle:horizontal { width: 5px; margin: 0 1px; }
+QSplitter::handle:horizontal { width: 9px; margin: 0 1px; }
 QSplitter::handle:vertical { height: 7px; margin: 1px 0; }
 """
 

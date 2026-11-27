@@ -181,7 +181,7 @@ See `docs/engineering/APP-REBOOT-001-engineering-workbench.md` for implemented s
 
 ## Desktop application and releases
 
-POWER_FAULT_ANALYZER is distributed as a native Windows desktop engineering application. The website in `website/` is the public download and release front door; it does not replace the native editor. The current Windows artifact is a portable ZIP bundle, not an MSI installer. See [Desktop distribution and releases](docs/product/DISTRIBUTION_AND_RELEASES.md) for the verified build and publication workflow. Public binary publication is currently blocked until the project license is selected and Qt/PySide6 redistribution obligations are reviewed.
+POWER_FAULT_ANALYZER is distributed as a native Windows desktop engineering application. The website in `website/` is the public download and release front door; it does not replace the native editor. The configured Windows release workflow builds a portable PyInstaller ZIP bundle and its SBOM, dependency-license inventory, third-party notices, build metadata and SHA-256 checksums; it does not produce an MSI/NSIS installer. The project source license is GPL-3.0-or-later, while third-party components retain their own terms. A successful clean-run GitHub Actions build and downloadable Windows artifact have not yet been accepted, so the public download page remains inactive until a GitHub Release contains `PFA-Windows-x64.zip`. See [Desktop distribution and releases](docs/product/DISTRIBUTION_AND_RELEASES.md) for the release contract and gates.
 
 
 ## Desktop iconography and engineering asset libraries

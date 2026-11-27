@@ -25,7 +25,7 @@
 ## Current verification evidence
 
 - The maintainer's Windows environment reported Ruff checks passing, `compileall` passing and **756 pytest tests passing** for the published `product-reboot` repair baseline (`ac721d907fa2d3f805995c40075450b58dc95e9a`).
-- The release workflow is configured for Windows x64 / Python 3.13. It runs lint, compilation, the complete pytest suite, APP-REBOOT-005 offscreen Qt/QElectroTech acceptance, PyInstaller packaging, a frozen-executable startup smoke, SBOM/license inventory generation and SHA-256 verification.
+- The release workflow is configured for Windows x64 / Python 3.13. It runs Ruff lint, compilation, the complete pytest suite, APP-REBOOT-005 offscreen Qt/QElectroTech acceptance, PyInstaller packaging, a frozen-executable startup smoke, SBOM/license inventory generation and SHA-256 verification. Repository-wide Ruff formatting is not a release gate yet: the current formatter audit reports 56 pre-existing files requiring a separate style-only migration.
 - APP-REBOOT-005 offscreen acceptance exercises the resizable workbench layout, inspector tabs, empty-canvas guidance, source-symbol preview, insertion/rotation/drag, undo/redo and JSON persistence. It does not establish full IEC symbol conformity or validate electrical topology for every equipment family.
 - The frozen-executable smoke starts the packaged executable with Qt offscreen and checks that its process remains alive for six seconds. It is a startup smoke, not a complete interactive GUI acceptance test.
 - **No successful clean-run GitHub Actions artifact is recorded as accepted in this snapshot.** A configured workflow is not evidence that the produced ZIP works on a clean Windows machine.

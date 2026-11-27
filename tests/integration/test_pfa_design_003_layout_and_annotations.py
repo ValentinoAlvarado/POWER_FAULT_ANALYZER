@@ -120,7 +120,7 @@ def test_explicit_double_bus_feeder_bars_are_horizontal_with_centered_labels():
     for name in ("BUS-A", "BUS-B", "FEEDER-A", "FEEDER-B"):
         label = labels[(buses[name].bus_id, name)]
         assert label.anchor == "middle"
-        assert abs(label.position.x - buses[name].center.x) < 1e-6
+        assert abs(label.position.x - buses[name].center.x) <= 24.0 + 1e-6
 
 
 

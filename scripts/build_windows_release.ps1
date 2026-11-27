@@ -146,6 +146,7 @@ if (-not $SkipTests) {
     Write-Host '== Frozen Windows executable startup acceptance ==' -ForegroundColor Cyan
     # The verifier throws if the frozen process exits during the startup window.
     & (Join-Path $PSScriptRoot 'verify_frozen_windows_app.ps1') -Executable $executable
+    & (Join-Path $PSScriptRoot 'verify_frozen_script_worker.ps1') -Executable $executable
 }
 
 Copy-Item -LiteralPath $license -Destination $appFolder -Force
@@ -160,6 +161,8 @@ $releaseDirectory = Join-Path $RepositoryRoot $OutputDirectory
 New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
 $thirdPartyNotices = Join-Path $releaseDirectory 'THIRD_PARTY_NOTICES.md'
 Copy-Item -LiteralPath (Join-Path $RepositoryRoot 'docs/engineering/THIRD_PARTY_LICENSE_REGISTER.md') -Destination $thirdPartyNotices -Force
+$updater = Join-Path $releaseDirectory 'Update-PFA-Portable.ps1'
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Update-PFA-Portable.ps1') -Destination $updater -Force
 
 Invoke-Checked 'Generate CycloneDX dependency inventory' {
     & $Python (Join-Path $PSScriptRoot 'generate_release_sbom.py') --output (Join-Path $releaseDirectory 'SBOM.cdx.json') --version $displayVersion
@@ -184,7 +187,7 @@ $buildInfo = [ordered]@{
     built_utc = [DateTime]::UtcNow.ToString('o')
     repository = 'https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER'
     distribution = 'portable PyInstaller onedir ZIP; no installer executable is produced by this workflow'
-    artifacts = @('PFA-Windows-x64.zip', 'SHA256SUMS.txt', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json')
+    artifacts = @('PFA-Windows-x64.zip', 'SHA256SUMS.txt', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json', 'Update-PFA-Portable.ps1')
 }
 $buildInfoPath = Join-Path $releaseDirectory 'BUILD-INFO.json'
 $buildInfo | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $buildInfoPath -Encoding UTF8
@@ -198,7 +201,7 @@ if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf) -or (Get-Item -Literal
 }
 
 $hashLines = @()
-foreach ($fileName in @('PFA-Windows-x64.zip', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json')) {
+foreach ($fileName in @('PFA-Windows-x64.zip', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json', 'Update-PFA-Portable.ps1')) {
     $path = Join-Path $releaseDirectory $fileName
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release sidecar missing: $path" }
     $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()

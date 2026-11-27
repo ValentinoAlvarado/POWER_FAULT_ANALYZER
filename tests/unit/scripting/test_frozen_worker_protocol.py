@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from power_fault_analyzer.scripting.worker import main
+from power_fault_analyzer.scripting.worker import execute_request, main
 
 
 def test_file_protocol_returns_serialized_workspace(tmp_path: Path) -> None:
@@ -38,3 +38,16 @@ def test_file_protocol_serializes_script_errors_without_console_streams(tmp_path
     assert payload["ok"] is False
     assert payload["error_type"] == "TypeError"
     assert "Script must create a ScriptProject" in payload["error"]
+
+
+def test_worker_captures_print_output() -> None:
+    result = execute_request({
+        "source": (
+            'project = ScriptProject("Captured output test")\\n'
+            'project.add_bus("BUS-01", voltage_kv=13.8)\\n'
+            'print("PFA automation output")\\n'
+        )
+    })
+
+    assert result["ok"] is True
+    assert result["captured_output"] == "PFA automation output\\n"

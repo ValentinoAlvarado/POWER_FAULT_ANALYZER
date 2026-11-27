@@ -28,7 +28,7 @@ _ALLOWED_BUILTINS = {
     "len": len, "list": list, "max": max, "min": min, "range": range,
     "reversed": reversed, "round": round, "set": set, "sorted": sorted,
     "str": str, "sum": sum, "tuple": tuple, "zip": zip,
-    "ValueError": ValueError, "TypeError": TypeError,
+    "ValueError": ValueError, "TypeError": TypeError, "print": print,
 }
 
 

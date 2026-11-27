@@ -1,7 +1,8 @@
 """Write a readable license inventory for all installed Python distributions."""
 from __future__ import annotations
+
 import argparse
-import importlib.metadata as metadata
+from importlib import metadata
 from pathlib import Path
 
 

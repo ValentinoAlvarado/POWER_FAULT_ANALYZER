@@ -52,6 +52,7 @@ class SvgSymbol:
     provenance: str = ""
     source_license: str = ""
     definition_hash: str = ""
+    model_state: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +187,7 @@ def render_svg(
         lines.append(
             f'<g id="equipment-{identifier}" data-symbol-id="{definition_id}" '
             f'data-family="{escape(symbol.family, quote=True)}" '
+            f'data-model-state="{escape(symbol.model_state or "resolved", quote=True)}" '
             f'data-standard-reference="{escape(symbol.standard_reference, quote=True)}" '
             f'data-normative-status="{escape(symbol.normative_status, quote=True)}" '
             f'data-provenance="{escape(symbol.provenance, quote=True)}" '
@@ -193,7 +195,12 @@ def render_svg(
             f'data-definition-sha256="{escape(symbol.definition_hash, quote=True)}" '
             f'transform="translate({_f(cx)} {_f(cy)}) rotate({_f(symbol.orientation_deg)})">'
         )
-        if symbol.family == "busbar":
+        if symbol.family == "connection_node":
+            lines.append(
+                f'<circle cx="0" cy="0" r="{_f(2.2 * scene_per_pt)}" '
+                'fill="#172033" stroke="none"/>'
+            )
+        elif symbol.family == "busbar":
             # Busbar envelopes are already rotated in the projected document.
             if width >= height:
                 lines.append(
@@ -313,6 +320,27 @@ def render_svg(
                 f'<circle cx="0" cy="0" r="{_f(1.7 * scene_per_pt)}" fill="#172033" stroke="none" '
                 f'data-terminal-id="{escape(terminal_id, quote=True)}"/>'
             )
+        elif symbol.family in {"load", "capacitor", "reactor", "compensation"}:
+            definition = get_symbol_definition(symbol.family)
+            for primitive in definition.primitives:
+                if primitive.kind == "circle":
+                    px, py, radius = primitive.coordinates
+                    lines.append(
+                        f'<circle cx="{_f(px)}" cy="{_f(py)}" r="{_f(radius)}" fill="none"/>'
+                    )
+                elif primitive.kind == "line":
+                    x1, y1, x2, y2 = primitive.coordinates
+                    lines.append(
+                        f'<path d="M {_f(x1)} {_f(y1)} L {_f(x2)} {_f(y2)}" fill="none"/>'
+                    )
+            if definition.text_glyph:
+                glyph_y = 0.30 * min(width, height) / 2.0
+                lines.append(
+                    f'<text x="0" y="{_f(glyph_y)}" text-anchor="middle" '
+                    'fill="#172033" stroke="none" font-family="Segoe UI, Arial, sans-serif" '
+                    f'font-size="{_f(8.5 * scene_per_pt)}" font-weight="600">'
+                    f'{escape(definition.text_glyph)}</text>'
+                )
         elif symbol.family == "generic":
             lines.append(f'<rect x="{_f(x)}" y="{_f(y)}" width="{_f(width)}" '
                          f'height="{_f(height)}"/>')
@@ -320,9 +348,24 @@ def render_svg(
                 f'<text x="0" y="{_f(3.0 * scene_per_pt)}" text-anchor="middle" '
                 f'font-size="{_f(6.0 * scene_per_pt)}" fill="#172033" stroke="none">?</text>'
             )
+        if symbol.model_state in {"unresolved", "partial-data"}:
+            badge_x = width / 2.0 + 4.0 * scene_per_pt
+            badge_y = -height / 2.0 - 4.0 * scene_per_pt
+            badge_radius = 4.0 * scene_per_pt
+            badge = "?" if symbol.model_state == "unresolved" else "!"
+            lines.append(
+                f'<circle cx="{_f(badge_x)}" cy="{_f(badge_y)}" r="{_f(badge_radius)}" '
+                'fill="#FFF7ED" stroke="#D97706" stroke-width="1.0"/>'
+            )
+            lines.append(
+                f'<text x="{_f(badge_x)}" y="{_f(badge_y + 2.2 * scene_per_pt)}" '
+                'text-anchor="middle" fill="#9A3412" stroke="none" '
+                f'font-size="{_f(6.0 * scene_per_pt)}" font-weight="700">{badge}</text>'
+            )
+
         # Terminal markers are independent geometry tied to canonical terminal IDs.
         terminal_markers_embedded = symbol.family in {
-            "transformer", "circuit_breaker", "disconnector", "earthing_switch", "junction"
+            "transformer", "circuit_breaker", "disconnector", "earthing_switch", "junction", "connection_node"
         }
         for terminal_index, point in enumerate(symbol.terminal_points):
             if terminal_markers_embedded:

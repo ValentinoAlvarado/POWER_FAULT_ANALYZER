@@ -427,7 +427,7 @@ def _automatic_equipment_layout(
                 top -= 90.0
                 bottom += 90.0
             preferred = (first.center.x + second.center.x) / 2.0
-            width = max(definition.height + 32.0, label_width + 24.0)
+            width = definition.height + label_width + 32.0
             vertical_requests.append(BayLaneRequest(request_id, top, bottom, preferred, width))
             direction = 90.0 if second.center.y >= first.center.y else -90.0
             metadata[request_id] = (equipment.id, preferred, (first.center.y + second.center.y) / 2.0,
@@ -1061,8 +1061,8 @@ def project_network_to_diagram(workspace: NetworkWorkspace) -> DiagramDocument:
 
         label_text = placement.label if placement is not None and placement.label else equipment.name
         label_side = (
-            "below" if (len(terminals) == 2 and abs(orientation) > 1e-6)
-            or (len(terminals) == 1 and family in {"generator", "load", "capacitor", "reactor", "compensation"})
+            "below" if len(terminals) == 1
+            and family in {"generator", "load", "capacitor", "reactor", "compensation"}
             else "above"
         )
         labels.extend(_layout_equipment_label(

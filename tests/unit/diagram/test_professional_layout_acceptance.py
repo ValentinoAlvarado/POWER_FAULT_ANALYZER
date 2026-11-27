@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from examples.canonical_model_scenarios import build_multibus_network
 from power_fault_analyzer.application.use_cases.network_workspace import NetworkWorkspace
-from power_fault_analyzer.application.use_cases.substation_engineering import BuildPFAES001Substation
 from power_fault_analyzer.application.use_cases.reference_network_template import BuildReferenceNetworkTemplate
+from power_fault_analyzer.application.use_cases.substation_engineering import BuildPFAES001Substation
 from power_fault_analyzer.diagram.model_document_export import render_engineering_svg
 from power_fault_analyzer.diagram.model_projection import (
     project_network_to_diagram,
@@ -20,9 +21,10 @@ from power_fault_analyzer.domain.enums.switching_device import SwitchingDeviceKi
 from power_fault_analyzer.domain.value_objects.voltage import Voltage
 from power_fault_analyzer.equipment.interfaces.unresolved_branch import UnresolvedTwoTerminalEquipment
 from power_fault_analyzer.equipment.interfaces.unresolved_equipment import EngineeringParameter
-from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import UnresolvedSingleTerminalEquipment
+from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import (
+    UnresolvedSingleTerminalEquipment,
+)
 from power_fault_analyzer.equipment.switching.switching_device import SwitchingDevice
-from examples.canonical_model_scenarios import build_multibus_network
 
 
 def _build_three_feeder_bays() -> NetworkWorkspace:

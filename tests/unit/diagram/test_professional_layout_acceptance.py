@@ -12,6 +12,7 @@ from power_fault_analyzer.application.use_cases.substation_engineering import (
     BuildPFAES001Substation,
 )
 from power_fault_analyzer.diagram.model_document_export import render_engineering_svg
+from power_fault_analyzer.diagram.layout import Point
 from power_fault_analyzer.diagram.model_projection import (
     project_network_to_diagram,
     validate_diagram_document,
@@ -139,7 +140,14 @@ def test_reference_case_layout_keeps_explicit_terminal_integrity_and_svg_busbar(
 def test_pfa_es001_svg_preserves_physical_busbars_and_internal_connection_nodes():
     built = BuildPFAES001Substation().execute()
     document = project_network_to_diagram(built.workspace)
-    assert validate_diagram_document(built.workspace, document) == ()
+    errors = validate_diagram_document(built.workspace, document)
+    if errors:
+        relevant_labels = [
+            (item.text, item.position, item.anchor)
+            for item in document.labels
+            if item.text in {"N-TR-BREAKER", "Q-TR-DS-EQUIPMENT (CLOSED)"}
+        ]
+        pytest.fail(f"Projection validation errors: {errors}; label positions: {relevant_labels}")
     _assert_no_label_collisions(document)
     assert len(document.buses) == 8
     assert sum(item.kind == "busbar" for item in document.buses) == 2

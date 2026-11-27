@@ -161,30 +161,43 @@ def _equipment_family(equipment) -> tuple[str, str | None]:
     if isinstance(equipment, Line):
         return "line", None
     if isinstance(equipment, UnresolvedSingleTerminalEquipment):
-        if equipment.equipment_kind == "source":
-            from power_fault_analyzer.domain.enums.equipment_interface import (
-                ParameterEvidenceStatus,
-            )
-            confirmed = any(
-                item.status is ParameterEvidenceStatus.USER_CONFIRMED
-                for item in equipment.parameters
-            )
-            unresolved = any(item.status in {
-                ParameterEvidenceStatus.UNRESOLVED,
-                ParameterEvidenceStatus.CONFLICTING,
-            } for item in equipment.parameters)
-            return "source", "partial-data" if confirmed and unresolved else "unresolved"
-        if equipment.equipment_kind in {"generator", "synchronous_generator"}:
-            return "generator", "unresolved"
-        return "generic", "unresolved"
+        kind = equipment.equipment_kind.casefold().replace("-", "_").replace(" ", "_")
+        equipment_family = getattr(equipment.family, "value", str(equipment.family)).casefold()
+        statuses = tuple(item.status.value for item in equipment.parameters)
+        has_confirmed = any(item not in {"UNRESOLVED", "CONFLICTING"} for item in statuses)
+        has_pending = any(item in {"UNRESOLVED", "CONFLICTING"} for item in statuses)
+        state = "partial-data" if has_confirmed and has_pending else "unresolved" if has_pending else None
+        if kind in {"load", "static_load", "demand", "consumer"} or equipment_family == "load":
+            return "load", state
+        if "capacitor" in kind or kind in {"cap_bank", "capacitor_bank"}:
+            return "capacitor", state
+        if "reactor" in kind or kind in {"inductor", "shunt_inductor"}:
+            return "reactor", state
+        if equipment_family == "compensation" or "compens" in kind:
+            return "compensation", state
+        if kind in {"generator", "synchronous_generator"} or equipment_family == "generator":
+            return "generator", state
+        if kind in {"source", "external_grid", "grid_equivalent"} or equipment_family == "source":
+            return "source", state
+        return "generic", state
+
     if isinstance(equipment, (UnresolvedTwoTerminalEquipment, UnresolvedEquipmentInterface)):
         kind = equipment.equipment_kind if isinstance(equipment, UnresolvedTwoTerminalEquipment) else (
             "line" if equipment.interface_kind.value == "transmission_line" else "transformer"
         )
-        if kind in {"line", "transmission_line"}:
+        normalized = kind.casefold().replace("-", "_").replace(" ", "_")
+        if normalized in {"line", "transmission_line", "overhead_line", "underground_cable"}:
             return "line", "unresolved"
-        if kind in {"transformer", "two_winding_transformer"}:
+        if normalized in {"transformer", "two_winding_transformer", "power_transformer"}:
             return "transformer", "unresolved"
+        if "capacitor" in normalized:
+            return "capacitor", "unresolved"
+        if "reactor" in normalized:
+            return "reactor", "unresolved"
+        if "compens" in normalized:
+            return "compensation", "unresolved"
+        if normalized in {"load", "static_load", "demand", "consumer"}:
+            return "load", "unresolved"
         return "generic", "unresolved"
     raise DiagramProjectionError(
         f"Equipment {equipment.name!r} ({type(equipment).__name__}) has no documented "
@@ -292,7 +305,6 @@ def _automatic_bus_layout(network: Network, grid: float):
     bus_order = {bus.id: index for index, bus in enumerate(network.buses)}
     source_priority = _source_priority(network, shunts)
     roots = sorted(network.buses, key=lambda bus: (source_priority.get(bus.id, 9), bus_order[bus.id]))
-    parents: dict[UUID, UUID | None] = {}
     children: dict[UUID, list[UUID]] = defaultdict(list)
     depth: dict[UUID, int] = {}
     component_roots: list[UUID] = []
@@ -301,7 +313,6 @@ def _automatic_bus_layout(network: Network, grid: float):
             continue
         component_roots.append(root.id)
         depth[root.id] = 0
-        parents[root.id] = None
         queue = deque([root.id])
         while queue:
             current = queue.popleft()
@@ -309,7 +320,6 @@ def _automatic_bus_layout(network: Network, grid: float):
                 if neighbor in depth:
                     continue
                 depth[neighbor] = depth[current] + 1
-                parents[neighbor] = current
                 children[current].append(neighbor)
                 queue.append(neighbor)
 

@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 from copy import deepcopy
 from dataclasses import fields, replace
@@ -429,6 +430,13 @@ class WorkbenchWindow(QMainWindow):
         self._update_check_worker = None
         self._update_download_worker = None
         self._update_progress: QProgressDialog | None = None
+        self._update_handoff_process: subprocess.Popen | None = None
+        self._update_handoff_timer: QTimer | None = None
+        self._update_handoff_status_path: Path | None = None
+        self._update_handoff_log_path: Path | None = None
+        self._update_handoff_bundle_directory: Path | None = None
+        self._update_handoff_started_at = 0.0
+        self._update_shutdown_approved = False
         self._build_actions()
         self._build_docks()
         self._build_central_workspace()
@@ -1760,6 +1768,13 @@ class WorkbenchWindow(QMainWindow):
         return self._save_project()
 
     def closeEvent(self, event) -> None:
+        if self._update_shutdown_approved:
+            # The update path already saved the project before downloading.
+            # Do not show a second discard prompt after the updater accepted handoff.
+            self._save_workspace_layout()
+            self.canvas.prepare_for_shutdown()
+            event.accept()
+            return
         if self._confirm_discard():
             self._save_workspace_layout()
             self.canvas.prepare_for_shutdown()
@@ -3662,6 +3677,29 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
             )
             return
 
+        log_directory = (
+            Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
+            / "POWER_FAULT_ANALYZER"
+            / "Logs"
+            / "Updates"
+        )
+        try:
+            log_directory.mkdir(parents=True, exist_ok=True)
+            updater_log_path = log_directory / f"{bundle.directory.name}.log"
+            status_path = log_directory / f"{bundle.directory.name}.status"
+            status_path.unlink(missing_ok=True)
+            updater_log = updater_log_path.open("w", encoding="utf-8")
+        except OSError as exc:
+            shutil.rmtree(bundle.directory, ignore_errors=True)
+            QMessageBox.critical(
+                self,
+                "PFA Update",
+                "PFA could not prepare persistent updater diagnostics. "
+                "The current version was not changed.\n\n"
+                f"{exc}",
+            )
+            return
+
         arguments = [
             str(powershell),
             "-NoLogo",
@@ -3680,6 +3718,8 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
             str(install_directory),
             "-WaitForProcessId",
             str(os.getpid()),
+            "-StatusPath",
+            str(status_path),
             "-Restart",
             "-CleanupDirectory",
             str(bundle.directory),
@@ -3688,58 +3728,145 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
         startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startup_info.wShowWindow = subprocess.SW_HIDE
         creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-
-        # Keep updater diagnostics outside the replaceable application directory.
-        # This log survives both a successful in-place replacement and cleanup of
-        # the temporary download bundle.
-        log_directory = (
-            Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
-            / "POWER_FAULT_ANALYZER"
-            / "Logs"
-            / "Updates"
-        )
-        updater_log_path = log_directory / f"{bundle.directory.name}.log"
-        updater_log = None
         try:
-            log_directory.mkdir(parents=True, exist_ok=True)
-            updater_log = updater_log_path.open("a", encoding="utf-8")
-        except OSError:
-            updater_log_path = None
-
-        try:
-            subprocess.Popen(
+            updater_process = subprocess.Popen(
                 arguments,
                 cwd=str(install_directory),
                 stdin=subprocess.DEVNULL,
-                stdout=updater_log if updater_log is not None else subprocess.DEVNULL,
-                stderr=subprocess.STDOUT if updater_log is not None else subprocess.DEVNULL,
+                stdout=updater_log,
+                stderr=subprocess.STDOUT,
                 close_fds=True,
                 startupinfo=startup_info,
                 creationflags=creation_flags,
             )
         except OSError as exc:
-            if updater_log is not None:
-                updater_log.close()
+            updater_log.close()
             shutil.rmtree(bundle.directory, ignore_errors=True)
-            log_detail = f"\nUpdater diagnostics: {updater_log_path}" if updater_log_path else ""
             QMessageBox.critical(
                 self,
                 "PFA Update",
-                "Could not start the portable updater. The current version was not changed."
-                f"\n\n{exc}{log_detail}",
+                "Could not start the portable updater. The current version was not changed.\n\n"
+                f"{exc}\n\nDiagnostics: {updater_log_path}",
             )
             return
         finally:
-            if updater_log is not None and not updater_log.closed:
+            if not updater_log.closed:
                 updater_log.close()
 
-        status_message = (
-            "Update prepared. Closing PFA so the verified replacement can be applied…"
+        self._update_handoff_process = updater_process
+        self._update_handoff_status_path = status_path
+        self._update_handoff_log_path = updater_log_path
+        self._update_handoff_bundle_directory = Path(bundle.directory)
+        self._update_handoff_started_at = time.monotonic()
+        self._update_handoff_timer = QTimer(self)
+        self._update_handoff_timer.setInterval(200)
+        self._update_handoff_timer.timeout.connect(self._poll_portable_update_handoff)
+        self.statusBar().showMessage(
+            "Preparing update. PFA will close only after the updater confirms it is ready…"
         )
-        if updater_log_path is not None:
-            status_message += f" Diagnostics: {updater_log_path}"
-        self.statusBar().showMessage(status_message)
-        QTimer.singleShot(350, self.close)
+        self._update_handoff_timer.start()
+
+    def _poll_portable_update_handoff(self) -> None:
+        status_path = self._update_handoff_status_path
+        process = self._update_handoff_process
+        if status_path is None or process is None:
+            self._fail_portable_update_handoff("Updater handoff state was not initialized.")
+            return
+
+        state = ""
+        detail = ""
+        try:
+            if status_path.is_file():
+                lines = status_path.read_text(encoding="utf-8-sig").splitlines()
+                if lines:
+                    state = lines[0].strip().lower()
+                    detail = "\n".join(lines[1:]).strip()
+        except (OSError, UnicodeError):
+            # The updater writes a tiny status file atomically from the user's
+            # perspective; a concurrent read can briefly fail on Windows.
+            pass
+
+        if state == "ready":
+            try:
+                # Acknowledge the handoff before closing. The PowerShell updater waits
+                # for this exact state, eliminating the race between "ready" and exit.
+                status_path.write_text("accepted", encoding="utf-8")
+            except OSError as exc:
+                self._fail_portable_update_handoff(
+                    f"PFA could not acknowledge the updater handoff: {exc}"
+                )
+                return
+            if self._update_handoff_timer is not None:
+                self._update_handoff_timer.stop()
+                self._update_handoff_timer.deleteLater()
+                self._update_handoff_timer = None
+            self._update_shutdown_approved = True
+            self.statusBar().showMessage(
+                "Updater accepted the handoff. Closing PFA for the verified replacement…"
+            )
+            QTimer.singleShot(0, self.close)
+            return
+
+        if state in {"failed", "rollback_failed", "rollback_restart_failed"}:
+            self._fail_portable_update_handoff(
+                detail or f"The updater stopped during its {state.replace('_', ' ')} stage."
+            )
+            return
+
+        exit_code = process.poll()
+        if exit_code is not None:
+            self._fail_portable_update_handoff(
+                detail
+                or "The updater process exited before confirming that it was ready "
+                f"(exit code {exit_code})."
+            )
+            return
+
+        if time.monotonic() - self._update_handoff_started_at > 30.0:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+            self._fail_portable_update_handoff(
+                "The updater did not complete its preflight handshake within 30 seconds. "
+                "PFA has remained open and the installed version was not changed."
+            )
+
+    def _fail_portable_update_handoff(self, detail: str) -> None:
+        if self._update_handoff_timer is not None:
+            self._update_handoff_timer.stop()
+            self._update_handoff_timer.deleteLater()
+            self._update_handoff_timer = None
+
+        bundle_directory = self._update_handoff_bundle_directory
+        process = self._update_handoff_process
+        if process is not None and process.poll() is not None and bundle_directory is not None:
+            shutil.rmtree(bundle_directory, ignore_errors=True)
+
+        log_path = self._update_handoff_log_path
+        log_detail = ""
+        if log_path is not None:
+            try:
+                if log_path.is_file():
+                    log_detail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+            except OSError:
+                pass
+
+        self._update_handoff_process = None
+        self._update_handoff_status_path = None
+        self._update_handoff_log_path = None
+        self._update_handoff_bundle_directory = None
+        diagnostics = f"\n\nUpdater log: {log_path}" if log_path is not None else ""
+        if log_detail:
+            diagnostics += f"\n\nLast updater output:\n{log_detail}"
+        QMessageBox.critical(
+            self,
+            "PFA Update Failed",
+            "The updater did not confirm a safe handoff. PFA has stayed open and "
+            "the installed version was not changed.\n\n"
+            f"{detail}{diagnostics}",
+        )
+        self.statusBar().showMessage("Update cancelled. The current installation was not changed.", 8000)
 
     def _about(self) -> None:
         QMessageBox.information(

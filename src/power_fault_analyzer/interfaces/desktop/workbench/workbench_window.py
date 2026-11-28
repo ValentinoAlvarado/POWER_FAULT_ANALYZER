@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import traceback
@@ -113,6 +114,12 @@ from power_fault_analyzer.equipment.transformers.two_winding_transformer import 
 )
 from power_fault_analyzer.equipment.transmission.line import Line
 from power_fault_analyzer.interfaces.desktop.icon_theme import engineering_icon
+from power_fault_analyzer.interfaces.desktop.release_updates import (
+    discover_latest_release,
+    download_update_bundle,
+    load_installation_build_info,
+    ReleaseUpdate,
+)
 from power_fault_analyzer.interfaces.desktop.workbench.code_automation_studio import (
     CodeAutomationStudio,
 )
@@ -128,12 +135,6 @@ from power_fault_analyzer.interfaces.desktop.workbench.dialogs import (
 from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import NetworkCanvasView
 from power_fault_analyzer.interfaces.desktop.workbench.qet_symbol_browser import QETSymbolBrowser
 from power_fault_analyzer.interfaces.desktop.workbench.results_workspace import ResultsWorkspace
-from power_fault_analyzer.interfaces.desktop.release_updates import (
-    ReleaseUpdate,
-    download_update_bundle,
-    discover_latest_release,
-    load_installation_build_info,
-)
 from power_fault_analyzer.operations import analyze_workspace, scenario_from_physical_network
 from power_fault_analyzer.operations.models import SwitchPosition as OperatingSwitchPosition
 
@@ -3622,6 +3623,7 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
             / "powershell.exe"
         )
         if not executable.is_file() or not powershell.is_file():
+            shutil.rmtree(bundle.directory, ignore_errors=True)
             QMessageBox.critical(
                 self,
                 "PFA Update",
@@ -3668,6 +3670,7 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
                 creationflags=creation_flags,
             )
         except OSError as exc:
+            shutil.rmtree(bundle.directory, ignore_errors=True)
             QMessageBox.critical(
                 self,
                 "PFA Update",

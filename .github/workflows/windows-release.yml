@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - "main"
       - "fix/portable-code-automation-worker"
       - "fix/diagram-auto-layout-r19"
     tags:
@@ -170,7 +171,7 @@ jobs:
         with:
           name: POWER_FAULT_ANALYZER ${{ github.ref_name }}
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(github.ref_name, '-') || contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'rc') }}
           files: |
             dist/release/PFA-Setup-x64.exe
             dist/release/PFA-Windows-x64.zip

@@ -35,7 +35,7 @@ def _release_payload(tag: str = "v0.1.0b2", *, include_all_assets: bool = True) 
         "assets": [
             {
                 "name": name,
-                "browser_download_url": f"https://github.com/example/releases/download/{tag}/{name}",
+                "browser_download_url": f"https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/releases/download/{tag}/{name}",
             }
             for name in names
         ],
@@ -48,6 +48,19 @@ def test_discover_latest_complete_release_including_prereleases():
         _release_payload("v0.1.0b3"),
         _release_payload("v0.2.0b1"),
         _release_payload("v9.0.0", include_all_assets=False),
+        {
+            **_release_payload("v8.0.0"),
+            "assets": [
+                {
+                    **asset,
+                    "browser_download_url": asset["browser_download_url"].replace(
+                        "https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER",
+                        "https://updates.example.test",
+                    ),
+                }
+                for asset in _release_payload("v8.0.0")["assets"]
+            ],
+        },
         {**_release_payload("v10.0.0"), "draft": True},
     ]
 

@@ -151,7 +151,7 @@ def discover_latest_release(
     candidates = [
         release
         for item in payload
-        if (release := _release_from_payload(item)) is not None
+        if (release := _release_from_payload(item, repository=repository)) is not None
     ]
     if not candidates:
         return None

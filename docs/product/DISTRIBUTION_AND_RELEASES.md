@@ -53,7 +53,7 @@ A portable build downloaded directly from a GitHub Actions artifact can be teste
 
 ## Public download page
 
-The website reads the repository's latest GitHub Release and activates the Windows install link only when that release contains `PFA-Setup-x64.exe`. The installer is a per-user NSIS setup executable and does not require Python or PyCharm. The portable ZIP remains available as the in-app update payload and an alternative portable distribution. In the absence of a complete release, the website displays that no verified installer is available. The website does not itself build, sign or validate the executable.
+The website reads the newest published GitHub Release that contains `PFA-Setup-x64.exe` (including a published prerelease) and activates the Windows install link only for that verified asset. The installer is a per-user NSIS setup executable and does not require Python or PyCharm. The portable ZIP remains available as the in-app update payload and an alternative portable distribution. In the absence of a complete release, the website displays that no verified installer is available. The website does not itself build, sign or validate the executable.
 
 ## Release gates
 

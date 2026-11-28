@@ -2,7 +2,7 @@
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-An extensible platform for balanced three-phase power-system short-circuit studies. The project uses Python 3.13.x, object-oriented domain modeling, DDD, and hexagonal architecture. The desktop and web clients are planned to share the same application and electrical-domain core.
+An extensible platform for balanced three-phase power-system short-circuit studies. The project uses Python 3.13.x, object-oriented domain modeling, DDD, and hexagonal architecture. The Windows desktop workbench is built on the application and electrical-domain core intended to support future clients.
 
 ## Get the Windows application
 

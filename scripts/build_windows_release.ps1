@@ -221,27 +221,7 @@ if ([string]::IsNullOrWhiteSpace($makensis) -or -not (Test-Path -LiteralPath $ma
 
 $resourceMatch = [regex]::Match(
     $displayVersion,
-    '^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:(?<pre>a|b|rc)(?<number>\d+))?
-foreach ($fileName in @('PFA-Setup-x64.exe', 'PFA-Windows-x64.zip', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json', 'Update-PFA-Portable.ps1')) {
-    $path = Join-Path $releaseDirectory $fileName
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release sidecar missing: $path" }
-    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-    $hashLines += "$hash  $fileName"
-}
-$checksumPath = Join-Path $releaseDirectory 'SHA256SUMS.txt'
-$hashLines | Set-Content -LiteralPath $checksumPath -Encoding ASCII
-
-if (-not $SkipTests) {
-    Write-Host '== Portable updater success, checksum and rollback acceptance ==' -ForegroundColor Cyan
-    & (Join-Path $PSScriptRoot 'verify_portable_updater.ps1') `
-        -UpdaterScript $updater `
-        -ZipPath $zipPath `
-        -ChecksumPath $checksumPath
-}
-
-Write-Host "Portable Windows package: $zipPath" -ForegroundColor Green
-Write-Host "Release sidecars: $releaseDirectory" -ForegroundColor Green
-Write-Host "Windows installer: $setupPath" -ForegroundColor Green
+    '^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:(?<pre>a|b|rc)(?<number>\d+))?$'
 )
 if (-not $resourceMatch.Success) {
     throw "Version '$displayVersion' cannot be represented in the Windows four-part file version."
@@ -256,7 +236,9 @@ if ($resourceMatch.Groups['number'].Success) {
     }
 }
 if ($resourceRevision -gt 65535) { throw 'Pre-release sequence exceeds Windows file-version limits.' }
-$resourceVersion = '{0}.{1}.{2}.{3}' -f $resourceMatch.Groups['major'].Value, $resourceMatch.Groups['minor'].Value, $resourceMatch.Groups['patch'].Value, $resourceRevision
+$versionParts = @([int]$resourceMatch.Groups['major'].Value, [int]$resourceMatch.Groups['minor'].Value, [int]$resourceMatch.Groups['patch'].Value, [int]$resourceRevision)
+if ($versionParts | Where-Object { $_ -gt 65535 }) { throw 'Version component exceeds Windows file-version limits.' }
+$resourceVersion = '{0}.{1}.{2}.{3}' -f $versionParts
 $setupPath = Join-Path $releaseDirectory 'PFA-Setup-x64.exe'
 if (Test-Path -LiteralPath $setupPath) { Remove-Item -LiteralPath $setupPath -Force }
 $nsisArgs = @(
@@ -270,6 +252,33 @@ Write-Host '== Build per-user Windows installer with NSIS ==' -ForegroundColor C
 if ($LASTEXITCODE -ne 0) { throw "NSIS installer build failed with exit code $LASTEXITCODE." }
 if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf) -or (Get-Item -LiteralPath $setupPath).Length -le 0) {
     throw 'NSIS did not produce a non-empty PFA-Setup-x64.exe.'
+}
+
+# Smoke-test a silent first-time install and uninstall on the Windows runner.
+$installerSmokeRoot = Join-Path $env:SystemDrive ("PFA-Installer-Acceptance-" + [guid]::NewGuid().ToString('N'))
+try {
+    $installerProcess = Start-Process -FilePath $setupPath -ArgumentList @('/S', "/D=$installerSmokeRoot") -Wait -PassThru
+    if ($installerProcess.ExitCode -ne 0) { throw "Silent NSIS install failed with exit code $($installerProcess.ExitCode)." }
+    $installedExe = Join-Path $installerSmokeRoot 'POWER_FAULT_ANALYZER.exe'
+    $installedInfoPath = Join-Path $installerSmokeRoot 'BUILD-INFO.json'
+    if (-not (Test-Path -LiteralPath $installedExe -PathType Leaf) -or -not (Test-Path -LiteralPath $installedInfoPath -PathType Leaf)) {
+        throw 'NSIS installation did not deploy the executable and build metadata.'
+    }
+    $installedInfo = Get-Content -LiteralPath $installedInfoPath -Raw | ConvertFrom-Json
+    if ($installedInfo.product -ne 'POWER_FAULT_ANALYZER' -or $installedInfo.version -ne $displayVersion -or $installedInfo.architecture -ne 'x64') {
+        throw 'NSIS installation deployed unexpected product/version/architecture metadata.'
+    }
+    $uninstaller = Join-Path $installerSmokeRoot 'Uninstall.exe'
+    if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'NSIS installation did not create its uninstaller.' }
+    $uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+    if ($uninstallProcess.ExitCode -ne 0) { throw "Silent NSIS uninstall failed with exit code $($uninstallProcess.ExitCode)." }
+    if (Test-Path -LiteralPath $installedExe) { throw 'NSIS uninstaller left POWER_FAULT_ANALYZER.exe behind.' }
+    Write-Host 'PASS NSIS installer deployed the expected application and uninstaller removed it.' -ForegroundColor Green
+}
+finally {
+    if (Test-Path -LiteralPath $installerSmokeRoot) {
+        Remove-Item -LiteralPath $installerSmokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 $hashLines = @()

@@ -10,13 +10,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$zip = (Resolve-Path -LiteralPath $ZipPath -ErrorAction Stop).Path
-$checksum = (Resolve-Path -LiteralPath $ChecksumPath -ErrorAction Stop).Path
-$zipName = Split-Path -Leaf $zip
-if ($zipName -ne 'PFA-Windows-x64.zip') {
-    throw 'The update archive must be named PFA-Windows-x64.zip.'
-}
-
 $install = [System.IO.Path]::GetFullPath($InstallDirectory)
 $root = [System.IO.Path]::GetPathRoot($install)
 $trimChars = [char[]]@('\', '/')
@@ -94,6 +87,12 @@ function Start-PFAApplication {
 }
 
 try {
+    $zip = (Resolve-Path -LiteralPath $ZipPath -ErrorAction Stop).Path
+    $checksum = (Resolve-Path -LiteralPath $ChecksumPath -ErrorAction Stop).Path
+    $zipName = Split-Path -Leaf $zip
+    if ($zipName -ne 'PFA-Windows-x64.zip') {
+        throw 'The update archive must be named PFA-Windows-x64.zip.'
+    }
     if ((Get-Item -LiteralPath $zip -ErrorAction Stop).Length -le 0) {
         throw 'Update archive is empty.'
     }
@@ -256,19 +255,18 @@ try {
         Set-ItemProperty -LiteralPath $uninstallRegistryPath -Name 'DisplayVersion' -Value $newVersion -ErrorAction Stop
     }
 
-    # Keep the backup after success. It is the operator's rollback copy.
-    $backupMoved = $false
+    # Confirm the replacement can start before declaring the update successful.
+    # A failed startup raises into the rollback path while the previous application
+    # is still retained at $backup.
     $restartDetail = 'automatic restart was not requested'
     if ($Restart) {
-        try {
-            $restartedProcess = Start-PFAApplication -ApplicationPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -WorkingDirectory $install
-            $restartDetail = "automatic restart confirmed; process_id=$($restartedProcess.Id)"
-        }
-        catch {
-            $restartDetail = "automatic restart failed: $($_.Exception.Message)"
-            Write-Warning "The update succeeded, but the new application did not remain running: $($_.Exception.Message)"
-        }
+        $restartedProcess = Start-PFAApplication -ApplicationPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -WorkingDirectory $install
+        $restartDetail = "automatic restart confirmed; process_id=$($restartedProcess.Id)"
     }
+
+    # Keep the backup after a successful update. On startup failure, leave this flag
+    # true so the catch block restores the previous installation automatically.
+    $backupMoved = $false
     Write-PFAUpdateLog -Status 'success' -Detail "New application promoted and verified; previous application retained; migrated $migratedProjectCount project document(s) to $userProjectsRoot; $restartDetail."
     Write-Host "PFA updated to version $newVersion." -ForegroundColor Green
     Write-Host "Previous application retained at: $backup" -ForegroundColor Yellow

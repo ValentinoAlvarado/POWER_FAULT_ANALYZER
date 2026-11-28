@@ -18,8 +18,18 @@
   fetch(`https://api.github.com/repos/${repository}/releases?per_page=30`, { headers: { Accept: 'application/vnd.github+json' } })
     .then(response => { if (!response.ok) throw new Error(`GitHub Releases request failed (${response.status})`); return response.json(); })
     .then(releases => {
-      const release = releases.find(item => !item.draft && (item.assets || []).some(asset => asset.name === 'PFA-Setup-x64.exe'));
-      if (!release) throw new Error('No published Windows installer is available yet.');
+      const requiredAssets = [
+        'PFA-Setup-x64.exe',
+        'PFA-Windows-x64.zip',
+        'SHA256SUMS.txt',
+        'Update-PFA-Portable.ps1',
+        'BUILD-INFO.json'
+      ];
+      const release = releases.find(item =>
+        !item.draft &&
+        requiredAssets.every(name => (item.assets || []).some(asset => asset.name === name))
+      );
+      if (!release) throw new Error('No complete published Windows release is available yet.');
       const asset = (release.assets || []).find(item => item.name === 'PFA-Setup-x64.exe');
       download.href = asset.browser_download_url;
       download.removeAttribute('aria-disabled');

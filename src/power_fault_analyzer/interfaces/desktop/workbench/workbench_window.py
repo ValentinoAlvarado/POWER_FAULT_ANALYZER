@@ -3478,6 +3478,7 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
     def _set_update_check_preference(self, enabled: bool) -> None:
         self._updates_on_startup = bool(enabled)
         self._ui_settings.setValue("updates/check_on_startup", self._updates_on_startup)
+        self._ui_settings.sync()
         self.statusBar().showMessage(
             "Automatic update checks enabled." if enabled else "Automatic update checks disabled.",
             5000,

@@ -108,11 +108,13 @@ def test_canonical_qt_symbols_render_to_an_offscreen_scene_without_clipping():
     assert not scene.itemsBoundingRect().isEmpty()
 
 
-def test_unresolved_load_and_compensation_symbols_render_with_visible_badges():
+def test_unresolved_load_and_compensation_symbols_keep_compact_bounds_without_badges():
     (
         QImage, QPainter, QApplication, QGraphicsScene, _, _, _,
         CanonicalEquipmentSymbol, _,
     ) = _qt_dependencies()
+    from PySide6.QtGui import QColor
+
     _application(QApplication)
     scene = QGraphicsScene()
     families = ("load", "capacitor", "reactor", "compensation")
@@ -122,8 +124,8 @@ def test_unresolved_load_and_compensation_symbols_render_with_visible_badges():
         )
         item.setPos(index * 150.0, 0.0)
         scene.addItem(item)
-        assert item.boundingRect().right() >= 26.0 + 24.0
-        assert item.boundingRect().top() <= -32.0 - 24.0
+        assert item.boundingRect().right() == pytest.approx(34.0)
+        assert item.boundingRect().top() == pytest.approx(-40.0)
     image = QImage(720, 220, QImage.Format.Format_ARGB32)
     image.fill(0xFFFFFFFF)
     painter = QPainter(image)
@@ -131,11 +133,17 @@ def test_unresolved_load_and_compensation_symbols_render_with_visible_badges():
     painter.end()
     assert not image.isNull()
     assert not scene.itemsBoundingRect().isEmpty()
+    orange = QColor("#D97706").rgba()
+    assert all(
+        image.pixel(x, y) != orange
+        for y in range(image.height())
+        for x in range(image.width())
+    )
 
 
-def test_unresolved_line_branch_keeps_state_badge_inside_qt_geometry():
+def test_unresolved_line_branch_keeps_compact_geometry_without_badge():
     from PySide6.QtCore import QPointF
-    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtGui import QColor, QImage, QPainter
     from PySide6.QtWidgets import QApplication, QGraphicsScene
 
     from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import BranchSymbol
@@ -146,8 +154,8 @@ def test_unresolved_line_branch_keeps_state_badge_inside_qt_geometry():
         uuid4(), "LINE-PENDING", QPointF(0.0, -80.0), QPointF(0.0, 80.0),
         "", state="unresolved",
     )
-    assert branch.boundingRect().left() <= -29.0
-    assert branch.boundingRect().right() >= 0.0
+    assert branch.boundingRect().left() > -2.0
+    assert branch.boundingRect().right() < 2.0
     scene.addItem(branch)
     image = QImage(240, 240, QImage.Format.Format_ARGB32)
     image.fill(0xFFFFFFFF)
@@ -155,3 +163,9 @@ def test_unresolved_line_branch_keeps_state_badge_inside_qt_geometry():
     scene.render(painter)
     painter.end()
     assert not image.isNull()
+    orange = QColor("#D97706").rgba()
+    assert all(
+        image.pixel(x, y) != orange
+        for y in range(image.height())
+        for x in range(image.width())
+    )

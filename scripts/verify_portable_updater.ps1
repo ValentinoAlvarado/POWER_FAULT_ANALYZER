@@ -83,6 +83,49 @@ try {
         throw 'Checksum rejection modified the existing installation.'
     }
 
+    # A replacement that cannot launch must roll back to the previous application.
+    $startupRoot = Join-Path $testRoot 'startup failure rollback'
+    $startupInstall = Join-Path $startupRoot 'application'
+    New-Item -ItemType Directory -Path $startupRoot | Out-Null
+    New-TestInstall -Directory $startupInstall -Version 'old-startup-failure-test'
+    function global:Start-Process {
+        [CmdletBinding()]
+        param(
+            [string]$FilePath,
+            [string]$WorkingDirectory,
+            [switch]$PassThru
+        )
+        throw 'Simulated application startup failure.'
+    }
+    $startupFailureObserved = $false
+    try {
+        & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $startupInstall -Restart
+    }
+    catch {
+        if ($_.Exception.Message -like '*PFA update failed*') {
+            $startupFailureObserved = $true
+        }
+        else {
+            throw
+        }
+    }
+    finally {
+        Remove-Item Function:\global:Start-Process -ErrorAction SilentlyContinue
+    }
+    if (-not $startupFailureObserved) {
+        throw 'An application startup failure did not fail the update transaction.'
+    }
+    $startupRestoredInfo = Get-Content -LiteralPath (Join-Path $startupInstall 'BUILD-INFO.json') -Raw | ConvertFrom-Json
+    if ($startupRestoredInfo.version -ne 'old-startup-failure-test') {
+        throw 'Failed application startup did not restore the previous installation.'
+    }
+    $startupFailedPackage = Get-ChildItem -LiteralPath $startupRoot -Directory |
+        Where-Object { $_.Name -like 'application.failed-*' } |
+        Select-Object -First 1
+    if (-not $startupFailedPackage) {
+        throw 'Failed replacement package was not quarantined after startup rollback.'
+    }
+
     # A normal promotion must retain the old application and outside user data.
     $successRoot = Join-Path $testRoot 'successful update'
     $successInstall = Join-Path $successRoot 'application'
@@ -213,6 +256,7 @@ try {
     }
 
     Write-Host 'PASS updater rejected checksum mismatch without modifying the installation.' -ForegroundColor Green
+    Write-Host 'PASS updater rolled back automatically when the replacement application failed to start.' -ForegroundColor Green
     Write-Host 'PASS updater promoted the new package and retained the previous application.' -ForegroundColor Green
     Write-Host 'PASS NSIS uninstaller and Windows uninstall registry metadata survived the in-place update.' -ForegroundColor Green
     Write-Host 'PASS injected promotion failure restored the original application.' -ForegroundColor Green

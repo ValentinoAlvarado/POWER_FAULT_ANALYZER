@@ -196,42 +196,35 @@ try {
         Start-Sleep -Milliseconds 400
         [System.IO.File]::WriteAllText($StatusFile, 'accepted')
     } -ArgumentList $successStatusPath
-    $global:PFA_UpdaterStartProcessCount = 0
-    function global:Start-Process {
-        [CmdletBinding()]
-        param(
-            [string]$FilePath,
-            [string]$WorkingDirectory,
-            [switch]$PassThru
-        )
-        if ($PassThru) {
-            $global:PFA_UpdaterStartProcessCount++
-            $fakeProcess = [pscustomobject]@{
-                Id = 424242
-                HasExited = $false
-                ExitCode = 0
-            }
-            $fakeProcess | Add-Member -MemberType ScriptMethod -Name Refresh -Value {}
-            return $fakeProcess
-        }
-    }
+    $restartedProcessId = $null
     try {
         & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $successInstall -UserProjectsDirectory $projectDirectory -WaitForProcessId 2147483646 -Restart -StatusPath $successStatusPath
+        Wait-Job -Job $ackJob | Out-Null
+        Receive-Job -Job $ackJob -ErrorAction Stop | Out-Null
+        Remove-Job -Job $ackJob -Force
+        $successStatus = Get-Content -LiteralPath $successStatusPath -Raw
+        if (-not $successStatus.StartsWith('success' + [Environment]::NewLine) -or
+            $successStatus -notmatch 'automatic restart confirmed') {
+            throw "Successful update did not confirm automatic restart: $successStatus"
+        }
+        if ($successStatus -notmatch 'process_id=(?<processId>\d+)') {
+            throw "Successful update did not report the restarted process ID: $successStatus"
+        }
+        $restartedProcessId = [int]$Matches.processId
+        $restartedProcess = Get-Process -Id $restartedProcessId -ErrorAction Stop
+        if ($restartedProcess.HasExited) {
+            throw 'The actual POWER_FAULT_ANALYZER process exited immediately after restart.'
+        }
     }
     finally {
-        Remove-Item Function:\global:Start-Process -ErrorAction SilentlyContinue
-    }
-    Wait-Job -Job $ackJob | Out-Null
-    Receive-Job -Job $ackJob -ErrorAction Stop | Out-Null
-    Remove-Job -Job $ackJob -Force
-    if ($global:PFA_UpdaterStartProcessCount -ne 1) {
-        throw "Successful update did not launch exactly one replacement application (count: $global:PFA_UpdaterStartProcessCount)."
-    }
-    Remove-Variable PFA_UpdaterStartProcessCount -Scope Global -ErrorAction SilentlyContinue
-    $successStatus = Get-Content -LiteralPath $successStatusPath -Raw
-    if (-not $successStatus.StartsWith('success' + [Environment]::NewLine) -or
-        $successStatus -notmatch 'automatic restart confirmed') {
-        throw "Successful update did not confirm automatic restart: $successStatus"
+        if ($ackJob -and $ackJob.State -notin @('Completed', 'Failed', 'Stopped')) {
+            Stop-Job -Job $ackJob -ErrorAction SilentlyContinue
+            Remove-Job -Job $ackJob -Force -ErrorAction SilentlyContinue
+        }
+        if ($restartedProcessId) {
+            Stop-Process -Id $restartedProcessId -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $restartedProcessId -Timeout 10 -ErrorAction SilentlyContinue
+        }
     }
     $newInfo = Get-Content -LiteralPath (Join-Path $successInstall 'BUILD-INFO.json') -Raw | ConvertFrom-Json
     if ($newInfo.product -ne 'POWER_FAULT_ANALYZER' -or $newInfo.architecture -ne 'x64') {
@@ -335,7 +328,7 @@ try {
 
     Write-Host 'PASS updater rejected checksum mismatch without modifying the installation.' -ForegroundColor Green
     Write-Host 'PASS updater rolled back automatically when the replacement application failed to start.' -ForegroundColor Green
-    Write-Host 'PASS updater relaunched the replacement application and confirmed it remained running.' -ForegroundColor Green
+    Write-Host 'PASS updater launched the actual frozen POWER_FAULT_ANALYZER.exe and confirmed the process remained running.' -ForegroundColor Green
     Write-Host 'PASS updater status handshake rejected missing desktop acknowledgement without modifying the installation.' -ForegroundColor Green
     Write-Host 'PASS updater status handshake reported ready and accepted states before applying the replacement.' -ForegroundColor Green
     Write-Host 'PASS updater promoted the new package and retained the previous application.' -ForegroundColor Green

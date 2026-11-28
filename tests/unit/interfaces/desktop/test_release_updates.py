@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 
 from power_fault_analyzer.interfaces.desktop.release_updates import (
+    ReleaseUpdate,
     discover_latest_release,
     download_update_bundle,
     load_installation_build_info,
-    ReleaseUpdate,
 )
 
 

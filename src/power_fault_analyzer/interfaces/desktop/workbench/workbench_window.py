@@ -115,10 +115,10 @@ from power_fault_analyzer.equipment.transformers.two_winding_transformer import 
 from power_fault_analyzer.equipment.transmission.line import Line
 from power_fault_analyzer.interfaces.desktop.icon_theme import engineering_icon
 from power_fault_analyzer.interfaces.desktop.release_updates import (
+    ReleaseUpdate,
     discover_latest_release,
     download_update_bundle,
     load_installation_build_info,
-    ReleaseUpdate,
 )
 from power_fault_analyzer.interfaces.desktop.workbench.code_automation_studio import (
     CodeAutomationStudio,

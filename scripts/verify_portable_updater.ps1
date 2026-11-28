@@ -121,9 +121,12 @@ try {
     if (-not (Test-Path -LiteralPath "$migratedProjectPath.network.json" -PathType Leaf)) {
         throw 'Update did not migrate the project network sidecar with its project document.'
     }
-    $migratedSidecarCollision = Join-Path $projectDirectory 'Sidecar Collision (migrated 2).pfa.network.json'
+    $migratedSidecarCollision = Join-Path $projectDirectory 'Sidecar Collision (migrated 2).pfa'
     if (-not (Test-Path -LiteralPath $migratedSidecarCollision -PathType Leaf)) {
-        throw 'Update did not preserve a legacy project when only its destination sidecar name was occupied.'
+        throw 'Update did not migrate a legacy project when only its destination sidecar name was occupied.'
+    }
+    if ((Get-Content -LiteralPath $migratedSidecarCollision -Raw).Trim() -ne '{"project":"sidecar-collision"}') {
+        throw 'Migrated project content changed when avoiding a destination sidecar collision.'
     }
     if ((Get-Content -LiteralPath $sidecarOnlyPath -Raw).Trim() -ne '{"network":"existing-only-sidecar"}') {
         throw 'Migrating a legacy project overwrote a pre-existing orphan network sidecar.'

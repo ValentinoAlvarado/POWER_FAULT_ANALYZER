@@ -32,10 +32,11 @@ try {
     New-Item -ItemType Directory -Path $emptyRoot | Out-Null
     New-TestInstall -Directory $emptyInstall -Version 'old-empty-manifest-test'
     $emptyManifest = Join-Path $emptyRoot 'SHA256SUMS.txt'
+    $emptyStatusPath = Join-Path $emptyRoot 'updater.status'
     [System.IO.File]::WriteAllText($emptyManifest, [string]::Empty)
     $emptyRejected = $false
     try {
-        & $updater -ZipPath $zip -ChecksumPath $emptyManifest -InstallDirectory $emptyInstall
+        & $updater -ZipPath $zip -ChecksumPath $emptyManifest -InstallDirectory $emptyInstall -StatusPath $emptyStatusPath
     }
     catch {
         if ($_.Exception.Message -like '*SHA256SUMS.txt is empty*') {
@@ -52,6 +53,9 @@ try {
     $emptyLog = Get-ChildItem -LiteralPath $emptyRoot -Filter 'application-update-*.log' -File |
         Select-Object -First 1
     if (-not $emptyLog) { throw 'An empty checksum manifest failure did not produce an update log.' }
+    if ((Get-Content -LiteralPath $emptyStatusPath -TotalCount 1) -ne 'failed') {
+        throw 'An empty checksum manifest failure did not report a failed handoff status.'
+    }
     $emptyLogText = Get-Content -LiteralPath $emptyLog.FullName -Raw
     if (-not $emptyLogText.Contains('status=failure') -or
         -not $emptyLogText.Contains('SHA256SUMS.txt is empty')) {
@@ -88,6 +92,7 @@ try {
     $startupInstall = Join-Path $startupRoot 'application'
     New-Item -ItemType Directory -Path $startupRoot | Out-Null
     New-TestInstall -Directory $startupInstall -Version 'old-startup-failure-test'
+    $startupStatusPath = Join-Path $startupRoot 'updater.status'
     function global:Start-Process {
         [CmdletBinding()]
         param(
@@ -99,7 +104,7 @@ try {
     }
     $startupFailureObserved = $false
     try {
-        & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $startupInstall -Restart
+        & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $startupInstall -Restart -StatusPath $startupStatusPath
     }
     catch {
         if ($_.Exception.Message -like '*PFA update failed*') {
@@ -124,6 +129,9 @@ try {
         Select-Object -First 1
     if (-not $startupFailedPackage) {
         throw 'Failed replacement package was not quarantined after startup rollback.'
+    }
+    if ((Get-Content -LiteralPath $startupStatusPath -TotalCount 1) -ne 'rollback_restart_failed') {
+        throw 'Failed startup did not report the rollback/restart outcome.'
     }
 
     # A normal promotion must retain the old application and outside user data.
@@ -154,7 +162,41 @@ try {
     $sidecarOnlyPath = Join-Path $projectDirectory 'Sidecar Collision.pfa.network.json'
     Set-Content -LiteralPath $sidecarOnlyPath -Value '{"network":"existing-only-sidecar"}' -Encoding UTF8
 
-    & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $successInstall -UserProjectsDirectory $projectDirectory
+    $successStatusPath = Join-Path $successRoot 'updater.status'
+    $global:PFA_UpdaterStartProcessCount = 0
+    function global:Start-Process {
+        [CmdletBinding()]
+        param(
+            [string]$FilePath,
+            [string]$WorkingDirectory,
+            [switch]$PassThru
+        )
+        if ($PassThru) {
+            $global:PFA_UpdaterStartProcessCount++
+            $fakeProcess = [pscustomobject]@{
+                Id = 424242
+                HasExited = $false
+                ExitCode = 0
+            }
+            $fakeProcess | Add-Member -MemberType ScriptMethod -Name Refresh -Value {}
+            return $fakeProcess
+        }
+    }
+    try {
+        & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $successInstall -UserProjectsDirectory $projectDirectory -Restart -StatusPath $successStatusPath
+    }
+    finally {
+        Remove-Item Function:\global:Start-Process -ErrorAction SilentlyContinue
+    }
+    if ($global:PFA_UpdaterStartProcessCount -ne 1) {
+        throw "Successful update did not launch exactly one replacement application (count: $global:PFA_UpdaterStartProcessCount)."
+    }
+    Remove-Variable PFA_UpdaterStartProcessCount -Scope Global -ErrorAction SilentlyContinue
+    $successStatus = Get-Content -LiteralPath $successStatusPath -Raw
+    if (-not $successStatus.StartsWith('success' + [Environment]::NewLine) -or
+        $successStatus -notmatch 'automatic restart confirmed') {
+        throw "Successful update did not confirm automatic restart: $successStatus"
+    }
     $newInfo = Get-Content -LiteralPath (Join-Path $successInstall 'BUILD-INFO.json') -Raw | ConvertFrom-Json
     if ($newInfo.product -ne 'POWER_FAULT_ANALYZER' -or $newInfo.architecture -ne 'x64') {
         throw 'Successful update did not install the expected PFA build.'
@@ -257,6 +299,8 @@ try {
 
     Write-Host 'PASS updater rejected checksum mismatch without modifying the installation.' -ForegroundColor Green
     Write-Host 'PASS updater rolled back automatically when the replacement application failed to start.' -ForegroundColor Green
+    Write-Host 'PASS updater relaunched the replacement application and confirmed it remained running.' -ForegroundColor Green
+    Write-Host 'PASS updater status handshake reported ready before application shutdown.' -ForegroundColor Green
     Write-Host 'PASS updater promoted the new package and retained the previous application.' -ForegroundColor Green
     Write-Host 'PASS NSIS uninstaller and Windows uninstall registry metadata survived the in-place update.' -ForegroundColor Green
     Write-Host 'PASS injected promotion failure restored the original application.' -ForegroundColor Green

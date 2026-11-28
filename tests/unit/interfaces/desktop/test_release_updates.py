@@ -235,7 +235,7 @@ def test_download_update_bundle_rejects_modified_updater_script(tmp_path: Path):
         release_updates.download_update_bundle(release, destination=tmp_path / "download", opener=opener)
 
 
-def test_download_update_bundle_falls_back_when_github_asset_api_returns_empty_body(
+def test_download_update_bundle_falls_back_when_github_asset_api_digest_mismatches(
     tmp_path: Path,
 ):
     archive_bytes = b"portable update archive bytes"

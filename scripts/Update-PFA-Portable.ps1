@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory = $true)][string]$InstallDirectory,
     [int]$WaitForProcessId = 0,
     [switch]$Restart,
-    [string]$CleanupDirectory = ''
+    [string]$CleanupDirectory = '',
+    [string]$UserProjectsDirectory = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -146,6 +147,48 @@ try {
 
     Move-Item -LiteralPath $install -Destination $backup -ErrorAction Stop
     $backupMoved = $true
+
+    # Preserve project documents that older builds may have saved in the install
+    # directory. New Save/Open dialogs default to Documents instead.
+    if ([string]::IsNullOrWhiteSpace($UserProjectsDirectory)) {
+        $documentsDirectory = [Environment]::GetFolderPath('MyDocuments')
+        if ([string]::IsNullOrWhiteSpace($documentsDirectory)) {
+            $documentsDirectory = Join-Path $env:USERPROFILE 'Documents'
+        }
+        $UserProjectsDirectory = Join-Path $documentsDirectory 'POWER_FAULT_ANALYZER\Projects'
+    }
+    $userProjectsRoot = [System.IO.Path]::GetFullPath($UserProjectsDirectory)
+    $projectDocuments = @(
+        Get-ChildItem -LiteralPath $backup -Filter '*.pfa' -File -Recurse -ErrorAction Stop
+    )
+    $migratedProjectCount = 0
+    foreach ($projectDocument in $projectDocuments) {
+        $relativeProjectPath = $projectDocument.FullName.Substring($backup.Length).TrimStart($trimChars)
+        $destinationProject = Join-Path $userProjectsRoot $relativeProjectPath
+        $destinationDirectory = Split-Path -Parent $destinationProject
+        New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
+
+        if ((Test-Path -LiteralPath $destinationProject) -or (Test-Path -LiteralPath "$destinationProject.network.json")) {
+            $destinationName = [System.IO.Path]::GetFileNameWithoutExtension($destinationProject)
+            $destinationExtension = [System.IO.Path]::GetExtension($destinationProject)
+            $suffix = 2
+            do {
+                $candidateName = "$destinationName (migrated $suffix)$destinationExtension"
+                $candidatePath = Join-Path $destinationDirectory $candidateName
+                $candidateSidecar = "$candidatePath.network.json"
+                $suffix++
+            } while ((Test-Path -LiteralPath $candidatePath) -or (Test-Path -LiteralPath $candidateSidecar))
+            $destinationProject = $candidatePath
+        }
+
+        Copy-Item -LiteralPath $projectDocument.FullName -Destination $destinationProject -ErrorAction Stop
+        $sourceSidecar = "$($projectDocument.FullName).network.json"
+        if (Test-Path -LiteralPath $sourceSidecar -PathType Leaf) {
+            Copy-Item -LiteralPath $sourceSidecar -Destination "$destinationProject.network.json" -ErrorAction Stop
+        }
+        $migratedProjectCount++
+    }
+
     Move-Item -LiteralPath $staging -Destination $install -ErrorAction Stop
 
     $installedExe = Join-Path $install 'POWER_FAULT_ANALYZER.exe'
@@ -157,10 +200,12 @@ try {
 
     # Keep the backup after success. It is the operator's rollback copy.
     $backupMoved = $false
-    Write-PFAUpdateLog -Status 'success' -Detail 'New application promoted and verified; previous application retained.'
+    Write-PFAUpdateLog -Status 'success' -Detail "New application promoted and verified; previous application retained; migrated $migratedProjectCount project document(s) to $userProjectsRoot."
     Write-Host "PFA updated to version $newVersion." -ForegroundColor Green
     Write-Host "Previous application retained at: $backup" -ForegroundColor Yellow
     Write-Host "Update record: $logPath"
+    Write-Host "Migrated project documents found inside the old installation: $migratedProjectCount"
+    Write-Host "Project folder: $userProjectsRoot"
     Write-Host 'Projects and Qt preferences outside the application directory were not modified.'
     if ($Restart) {
         try {

@@ -17,6 +17,7 @@ from PySide6.QtCore import (
     QRectF,
     QRunnable,
     QSettings,
+    QStandardPaths,
     QSize,
     Qt,
     QThreadPool,
@@ -1670,11 +1671,27 @@ class WorkbenchWindow(QMainWindow):
     def _network_sidecar(project_path: Path) -> Path:
         return project_path.with_suffix(project_path.suffix + ".network.json")
 
+    @staticmethod
+    def _default_projects_directory() -> Path:
+        """Return a per-user project directory outside the application installation."""
+        documents = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+        base = Path(documents) if documents else Path.home() / "Documents"
+        directory = base / "POWER_FAULT_ANALYZER" / "Projects"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
     def _open_project(self) -> None:
         if not self._confirm_discard():
             return
+        initial_directory = (
+            self.project_path.parent
+            if self.project_path is not None
+            else self._default_projects_directory()
+        )
         selected, _ = QFileDialog.getOpenFileName(
-            self, "Open PFA Project", "", "PFA Project (*.pfa)"
+            self, "Open PFA Project", str(initial_directory), "PFA Project (*.pfa)"
         )
         if not selected:
             return
@@ -1727,8 +1744,13 @@ class WorkbenchWindow(QMainWindow):
         return True
 
     def _save_project_as(self) -> bool:
+        initial_path = (
+            self.project_path
+            if self.project_path is not None
+            else self._default_projects_directory() / f"{self.project.name}.pfa"
+        )
         selected, _ = QFileDialog.getSaveFileName(
-            self, "Save PFA Project", f"{self.project.name}.pfa", "PFA Project (*.pfa)"
+            self, "Save PFA Project", str(initial_path), "PFA Project (*.pfa)"
         )
         if not selected:
             return False

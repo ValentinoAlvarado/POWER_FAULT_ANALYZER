@@ -56,12 +56,22 @@ try {
     $successInstall = Join-Path $successRoot 'application'
     New-Item -ItemType Directory -Path $successRoot | Out-Null
     New-TestInstall -Directory $successInstall -Version 'old-success-test'
+    $legacyProjectPath = Join-Path $successInstall 'Legacy Project.pfa'
+    Set-Content -LiteralPath $legacyProjectPath -Value '{"project":"legacy"}' -Encoding UTF8
+    Set-Content -LiteralPath "$legacyProjectPath.network.json" -Value '{"network":"legacy"}' -Encoding UTF8
+    $sidecarCollisionProject = Join-Path $successInstall 'Sidecar Collision.pfa'
+    Set-Content -LiteralPath $sidecarCollisionProject -Value '{"project":"sidecar-collision"}' -Encoding UTF8
     $projectDirectory = Join-Path $testRoot 'User Documents\POWER_FAULT_ANALYZER\Projects'
     New-Item -ItemType Directory -Path $projectDirectory -Force | Out-Null
-    $projectPath = Join-Path $projectDirectory 'Keep.json'
-    Set-Content -LiteralPath $projectPath -Value '{"project":"preserve"}' -Encoding UTF8
+    $externalProjectPath = Join-Path $projectDirectory 'Keep.pfa'
+    Set-Content -LiteralPath $externalProjectPath -Value '{"project":"preserve"}' -Encoding UTF8
+    $collisionProjectPath = Join-Path $projectDirectory 'Legacy Project.pfa'
+    Set-Content -LiteralPath $collisionProjectPath -Value '{"project":"existing"}' -Encoding UTF8
+    Set-Content -LiteralPath "$collisionProjectPath.network.json" -Value '{"network":"existing"}' -Encoding UTF8
+    $sidecarOnlyPath = Join-Path $projectDirectory 'Sidecar Collision.pfa.network.json'
+    Set-Content -LiteralPath $sidecarOnlyPath -Value '{"network":"existing-only-sidecar"}' -Encoding UTF8
 
-    & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $successInstall
+    & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $successInstall -UserProjectsDirectory $projectDirectory
     $newInfo = Get-Content -LiteralPath (Join-Path $successInstall 'BUILD-INFO.json') -Raw | ConvertFrom-Json
     if ($newInfo.product -ne 'POWER_FAULT_ANALYZER' -or $newInfo.architecture -ne 'x64') {
         throw 'Successful update did not install the expected PFA build.'
@@ -73,8 +83,28 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $successBackup.FullName 'POWER_FAULT_ANALYZER.exe'))) {
         throw 'Previous application backup is incomplete.'
     }
-    if (-not (Test-Path -LiteralPath $projectPath -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $externalProjectPath -PathType Leaf)) {
         throw 'Update changed a project stored outside the application directory.'
+    }
+    if ((Get-Content -LiteralPath $collisionProjectPath -Raw).Trim() -ne '{"project":"existing"}') {
+        throw 'Migrating legacy projects overwrote an existing user project.'
+    }
+    if ((Get-Content -LiteralPath "$collisionProjectPath.network.json" -Raw).Trim() -ne '{"network":"existing"}') {
+        throw 'Migrating legacy projects overwrote an existing user network sidecar.'
+    }
+    $migratedProjectPath = Join-Path $projectDirectory 'Legacy Project (migrated 2).pfa'
+    if (-not (Test-Path -LiteralPath $migratedProjectPath -PathType Leaf)) {
+        throw 'Update did not migrate a project that was stored inside the old application directory.'
+    }
+    if (-not (Test-Path -LiteralPath "$migratedProjectPath.network.json" -PathType Leaf)) {
+        throw 'Update did not migrate the project network sidecar with its project document.'
+    }
+    $migratedSidecarCollision = Join-Path $projectDirectory 'Sidecar Collision (migrated 2).pfa.network.json'
+    if (-not (Test-Path -LiteralPath $migratedSidecarCollision -PathType Leaf)) {
+        throw 'Update did not preserve a legacy project when only its destination sidecar name was occupied.'
+    }
+    if ((Get-Content -LiteralPath $sidecarOnlyPath -Raw).Trim() -ne '{"network":"existing-only-sidecar"}') {
+        throw 'Migrating a legacy project overwrote a pre-existing orphan network sidecar.'
     }
 
     # Inject failure on the staging-to-install rename. The third move is rollback.
@@ -129,6 +159,7 @@ try {
     Write-Host 'PASS updater promoted the new package and retained the previous application.' -ForegroundColor Green
     Write-Host 'PASS injected promotion failure restored the original application.' -ForegroundColor Green
     Write-Host 'PASS project documents outside the application directory remained intact.' -ForegroundColor Green
+    Write-Host 'PASS legacy project documents and network sidecars inside the old install were migrated to Documents.' -ForegroundColor Green
 }
 finally {
     Remove-Item Function:\global:Move-Item -ErrorAction SilentlyContinue

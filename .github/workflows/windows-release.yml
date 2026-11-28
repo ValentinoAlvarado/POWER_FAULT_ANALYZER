@@ -43,20 +43,19 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
-          $candidates = @(
-            (Join-Path $programFilesX86 'NSIS\makensis.exe'),
-            (Join-Path $env:ProgramFiles 'NSIS\makensis.exe')
-          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-          if (-not $candidates) {
+          $makensisPath = Join-Path $programFilesX86 'NSIS\makensis.exe'
+          if (-not (Test-Path -LiteralPath $makensisPath -PathType Leaf)) {
+            $makensisPath = Join-Path $env:ProgramFiles 'NSIS\makensis.exe'
+          }
+          if (-not (Test-Path -LiteralPath $makensisPath -PathType Leaf)) {
             choco install nsis --yes --no-progress
             if ($LASTEXITCODE -ne 0) { throw "Chocolatey NSIS installation failed with exit code $LASTEXITCODE." }
-            $candidates = @(
-              (Join-Path $programFilesX86 'NSIS\makensis.exe'),
-              (Join-Path $env:ProgramFiles 'NSIS\makensis.exe')
-            ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+            $makensisPath = Join-Path $programFilesX86 'NSIS\makensis.exe'
           }
-          if (-not $candidates) { throw 'NSIS installation completed but makensis.exe was not found.' }
-          "PFA_MAKENSIS_PATH=$($candidates[0])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if (-not (Test-Path -LiteralPath $makensisPath -PathType Leaf)) {
+            throw "NSIS installation completed but makensis.exe was not found at: $makensisPath"
+          }
+          "PFA_MAKENSIS_PATH=$makensisPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Install Cairo native runtime
         uses: msys2/setup-msys2@v2

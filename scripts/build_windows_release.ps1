@@ -209,14 +209,17 @@ if ([string]::IsNullOrWhiteSpace($makensis) -or -not (Test-Path -LiteralPath $ma
 }
 if ([string]::IsNullOrWhiteSpace($makensis) -or -not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
     $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
-    $nsisCandidates = @(
-        (Join-Path $programFilesX86 'NSIS\makensis.exe'),
-        (Join-Path $env:ProgramFiles 'NSIS\makensis.exe')
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-    if ($nsisCandidates) { $makensis = $nsisCandidates[0] }
+    $candidate = Join-Path $programFilesX86 'NSIS\makensis.exe'
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        $makensis = $candidate
+    }
+    else {
+        $candidate = Join-Path $env:ProgramFiles 'NSIS\makensis.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { $makensis = $candidate }
+    }
 }
 if ([string]::IsNullOrWhiteSpace($makensis) -or -not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
-    throw 'NSIS makensis.exe is required to build PFA-Setup-x64.exe.'
+    throw "NSIS makensis.exe is required to build PFA-Setup-x64.exe. Detected path: '$makensis'."
 }
 
 $resourceMatch = [regex]::Match(

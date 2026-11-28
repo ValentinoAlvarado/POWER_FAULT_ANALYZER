@@ -42,6 +42,7 @@ class ReleaseUpdate:
     body: str
     asset_urls: dict[str, str]
     asset_api_urls: dict[str, str] = field(default_factory=dict)
+    asset_hashes: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +118,7 @@ def _release_from_payload(
     trusted_asset_prefix = f"/{repository}/releases/download/"
     assets: dict[str, str] = {}
     asset_api_urls: dict[str, str] = {}
+    asset_hashes: dict[str, str] = {}
     for asset in payload.get("assets", ()):
         name = str(asset.get("name", ""))
         url = str(asset.get("browser_download_url", ""))
@@ -136,6 +138,10 @@ def _release_from_payload(
                 asset_api_urls[name] = (
                     f"https://api.github.com/repos/{repository}/releases/assets/{asset_id}"
                 )
+            digest = str(asset.get("digest") or "").strip()
+            digest_match = re.fullmatch(r"sha256:([a-fA-F0-9]{64})", digest)
+            if digest_match:
+                asset_hashes[name] = digest_match.group(1).lower()
     if any(name not in assets for name in _REQUIRED_ASSETS):
         return None
 
@@ -148,6 +154,7 @@ def _release_from_payload(
         body=str(payload.get("body") or ""),
         asset_urls=assets,
         asset_api_urls=asset_api_urls,
+        asset_hashes=asset_hashes,
     )
 
 
@@ -222,6 +229,7 @@ def _download_asset(
     asset_index: int,
     asset_count: int,
     api_url: str | None = None,
+    expected_sha256: str | None = None,
 ) -> None:
     """Download an asset, preferring GitHub's asset API and falling back to its browser URL.
 
@@ -264,6 +272,12 @@ def _download_asset(
                     f"GitHub returned a truncated release asset "
                     f"({downloaded} of {total_length} bytes)."
                 )
+            if expected_sha256:
+                actual_sha256 = _sha256(destination)
+                if actual_sha256 != expected_sha256:
+                    raise ValueError(
+                        "Downloaded release asset does not match GitHub's SHA-256 digest."
+                    )
             return
         except Exception as exc:  # noqa: BLE001 - retry the alternate official URL.
             failures.append(f"{candidate}: {exc}")
@@ -321,6 +335,7 @@ def download_update_bundle(
                 asset_index=index,
                 asset_count=len(targets),
                 api_url=release.asset_api_urls.get(name),
+                expected_sha256=release.asset_hashes.get(name),
             )
 
         expected = _expected_hashes(checksum)

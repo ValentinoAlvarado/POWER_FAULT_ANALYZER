@@ -35,6 +35,7 @@ def _release_payload(tag: str = "v0.1.0b2", *, include_all_assets: bool = True) 
         "assets": [
             {
                 "id": 1000 + index,
+                "digest": "sha256:" + ("a" * 64),
                 "name": name,
                 "browser_download_url": f"https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/releases/download/{tag}/{name}",
             }
@@ -77,6 +78,7 @@ def test_discover_latest_complete_release_including_prereleases():
     assert set(release.asset_urls) == set(_REQUIRED)
     assert set(release.asset_api_urls) == set(_REQUIRED)
     assert release.asset_api_urls["SHA256SUMS.txt"].endswith("/releases/assets/1001")
+    assert release.asset_hashes["SHA256SUMS.txt"] == "a" * 64
 
 
 def test_discover_latest_release_returns_none_when_current_is_current():
@@ -255,7 +257,7 @@ def test_download_update_bundle_falls_back_when_github_asset_api_returns_empty_b
         browser_urls["SHA256SUMS.txt"]: checksum_bytes,
         browser_urls["Update-PFA-Portable.ps1"]: updater_bytes,
         browser_urls["PFA-Windows-x64.zip"]: archive_bytes,
-        api_urls["SHA256SUMS.txt"]: b"",
+        api_urls["SHA256SUMS.txt"]: b"corrupted manifest",
         api_urls["Update-PFA-Portable.ps1"]: updater_bytes,
         api_urls["PFA-Windows-x64.zip"]: archive_bytes,
     }
@@ -275,6 +277,11 @@ def test_download_update_bundle_falls_back_when_github_asset_api_returns_empty_b
         body="",
         asset_urls=browser_urls,
         asset_api_urls=api_urls,
+        asset_hashes={
+            "SHA256SUMS.txt": hashlib.sha256(checksum_bytes).hexdigest(),
+            "Update-PFA-Portable.ps1": hashlib.sha256(updater_bytes).hexdigest(),
+            "PFA-Windows-x64.zip": hashlib.sha256(archive_bytes).hexdigest(),
+        },
     )
 
     bundle = release_updates.download_update_bundle(

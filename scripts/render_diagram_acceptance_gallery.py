@@ -116,18 +116,28 @@ def _render_qt(workspace: NetworkWorkspace, output: Path) -> None:
         (item["family"], item["resolved_family"], item["pixel_size"], item["latin_coverage"])
         for item in font_samples
     }
+    diagnostics = {
+        "installed_families": list(installed_fonts),
+        "samples": [dict(zip(
+            ("family", "resolved_family", "pixel_size", "latin_coverage"), item
+        )) for item in sorted(unique_samples)],
+        "label_count": len(font_samples),
+        "sample_text": [item["text"] for item in font_samples[:5]],
+    }
     print(
         "PFA_QT_FONT_DIAGNOSTICS|"
-        + json.dumps({
-            "installed_families": list(installed_fonts),
-            "samples": [dict(zip(
-                ("family", "resolved_family", "pixel_size", "latin_coverage"), item
-            )) for item in sorted(unique_samples)],
-            "label_count": len(font_samples),
-            "sample_text": [item["text"] for item in font_samples[:5]],
-        }, ensure_ascii=False, separators=(",", ":")),
+        + json.dumps(diagnostics, ensure_ascii=False, separators=(",", ":")),
         flush=True,
     )
+    invalid_samples = [
+        item for item in font_samples
+        if not item["resolved_family"] or not item["latin_coverage"]
+    ]
+    if invalid_samples:
+        raise RuntimeError(
+            "Qt acceptance gallery has labels without a resolved Latin-capable font: "
+            + json.dumps(diagnostics, ensure_ascii=False, separators=(",", ":"))
+        )
     view.show()
     app.processEvents()
     scene_rect = view.scene().sceneRect()

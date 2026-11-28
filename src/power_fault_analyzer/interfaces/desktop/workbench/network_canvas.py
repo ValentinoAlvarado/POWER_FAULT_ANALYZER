@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from functools import lru_cache
+from pathlib import Path
 from uuid import UUID
 
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, Signal
@@ -77,10 +78,41 @@ _SCENE_FONT_FALLBACKS = (
 )
 
 
+def _query_scene_font_families() -> tuple[str, ...]:
+    """Read the fonts visible to the active Qt platform plugin."""
+    return tuple(QFontDatabase.families())
+
+
+@lru_cache(maxsize=1)
+def _bundled_scene_font_families() -> tuple[str, ...]:
+    """Register a packaged Latin-capable font when the platform exposes no fonts.
+
+    The offscreen Qt platform used by headless Windows runners can report an
+    empty system font inventory. Matplotlib is already a required application
+    dependency and ships the open DejaVu Sans face in its mpl-data directory;
+    registering that face keeps both CI previews and portable builds legible.
+    """
+    try:
+        from matplotlib import get_data_path
+
+        font_path = Path(get_data_path()) / "fonts" / "ttf" / "DejaVuSans.ttf"
+        if not font_path.is_file():
+            return ()
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        if font_id < 0:
+            return ()
+        return tuple(QFontDatabase.applicationFontFamilies(font_id))
+    except (ImportError, OSError, RuntimeError):
+        return ()
+
+
 @lru_cache(maxsize=1)
 def _installed_scene_font_families() -> tuple[str, ...]:
-    """Cache the system font inventory; it does not change during a session."""
-    return tuple(QFontDatabase.families())
+    """Cache Qt's system fonts, with a packaged font as an offscreen fallback."""
+    families = _query_scene_font_families()
+    if families:
+        return families
+    return _bundled_scene_font_families()
 
 
 def _resolve_scene_font_family(

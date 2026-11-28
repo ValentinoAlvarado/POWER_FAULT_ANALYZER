@@ -121,3 +121,37 @@ def test_diagram_label_item_stores_the_resolved_font_family():
 
     assert item.font_family == resolve_font_family("STIX Two Text")
     assert item.font().family() == item.font_family
+
+
+def test_empty_qt_font_inventory_registers_packaged_dejavu_fallback(monkeypatch):
+    (
+        QApplication,
+        _,
+        QRawFont,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = _qt_dependencies()
+    _ensure_application(QApplication)
+
+    from power_fault_analyzer.interfaces.desktop.workbench import network_canvas
+
+    monkeypatch.setattr(network_canvas, "_query_scene_font_families", lambda: ())
+    network_canvas._installed_scene_font_families.cache_clear()
+    network_canvas._bundled_scene_font_families.cache_clear()
+
+    families = network_canvas._installed_scene_font_families()
+    assert "DejaVu Sans" in families
+
+    raw_font = QRawFont.fromFont(network_canvas._scene_font("STIX Two Text", 9.0))
+    assert raw_font.isValid()
+    required_characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-+() /†°µΩ"
+    unsupported = [
+        character
+        for character in required_characters
+        if not raw_font.supportsCharacter(ord(character))
+    ]
+    assert unsupported == [], f"Bundled font lacks engineering glyphs: {unsupported!r}"
+

@@ -72,6 +72,17 @@ def load_installation_build_info(
     except (OSError, json.JSONDecodeError):
         return None
 
+    if not isinstance(metadata, dict):
+        return None
+
+    version_value = metadata.get("version")
+    try:
+        if not isinstance(version_value, str) or not version_value.strip():
+            return None
+        Version(version_value.strip().removeprefix("v"))
+    except InvalidVersion:
+        return None
+
     if (
         metadata.get("product") != "POWER_FAULT_ANALYZER"
         or metadata.get("architecture") != "x64"

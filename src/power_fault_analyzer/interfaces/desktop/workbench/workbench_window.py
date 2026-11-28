@@ -3503,7 +3503,11 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
             lambda: discover_latest_release(build_info["version"])
         )
         worker.signals.succeeded.connect(
-            lambda release: self._update_check_completed(release, automatic)
+            lambda release: self._update_check_completed(
+                release,
+                automatic,
+                build_info["version"],
+            )
         )
         worker.signals.failed.connect(
             lambda detail: self._update_check_failed(detail, automatic)
@@ -3512,7 +3516,10 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
         self._thread_pool.start(worker)
 
     def _update_check_completed(
-        self, release: ReleaseUpdate | None, automatic: bool
+        self,
+        release: ReleaseUpdate | None,
+        automatic: bool,
+        installed_version: str,
     ) -> None:
         self._update_check_worker = None
         self.check_updates_action.setEnabled(True)
@@ -3533,7 +3540,7 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
             notes = notes[:1400].rstrip() + "…"
         details = (
             f"A newer POWER_FAULT_ANALYZER version is available.\n\n"
-            f"Installed: {load_installation_build_info()['version']}\n"
+            f"Installed: {installed_version}\n"
             f"Available: {release.tag_name}\n\n"
             f"{notes or 'No release notes were provided.'}\n\n"
             "The portable application will be updated in place. Your project files and "

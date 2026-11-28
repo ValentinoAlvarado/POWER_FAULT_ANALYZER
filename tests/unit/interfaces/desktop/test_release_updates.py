@@ -129,6 +129,31 @@ def test_load_installation_build_info_rejects_wrong_product(tmp_path: Path):
     assert release_updates.load_installation_build_info(tmp_path) is None
 
 
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "[]",
+        "null",
+        "{not-json",
+        json.dumps(
+            {
+                "product": "POWER_FAULT_ANALYZER",
+                "version": "not-a-version",
+                "architecture": "x64",
+                "git_commit": "a" * 40,
+            }
+        ),
+    ],
+)
+def test_load_installation_build_info_ignores_invalid_metadata(
+    tmp_path: Path, payload: str
+):
+    (tmp_path / "BUILD-INFO.json").write_text(payload, encoding="utf-8")
+
+    assert release_updates.load_installation_build_info(tmp_path) is None
+
+
 def test_download_update_bundle_verifies_archive_and_updater_hashes(tmp_path: Path):
     archive_bytes = b"portable update archive bytes"
     updater_bytes = b"Write-Host 'verified updater'"

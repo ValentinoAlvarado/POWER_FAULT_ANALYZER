@@ -7,12 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from power_fault_analyzer.interfaces.desktop.release_updates import (
-    ReleaseUpdate,
-    discover_latest_release,
-    download_update_bundle,
-    load_installation_build_info,
-)
+from power_fault_analyzer.interfaces.desktop import release_updates
 
 
 _REQUIRED = (
@@ -61,7 +56,7 @@ def test_discover_latest_complete_release_including_prereleases():
         assert timeout == 8.0
         return _Response(json.dumps(payload).encode("utf-8"))
 
-    release = discover_latest_release("0.1.0b1", opener=opener)
+    release = release_updates.discover_latest_release("0.1.0b1", opener=opener)
 
     assert release is not None
     assert release.tag_name == "v0.2.0b1"
@@ -69,22 +64,22 @@ def test_discover_latest_complete_release_including_prereleases():
     assert set(release.asset_urls) == set(_REQUIRED)
 
 
-def test_discover_latest_release_returns_none_when_current_is_current():
+def test_release_updates.discover_latest_release_returns_none_when_current_is_current():
     payload = [_release_payload("v0.1.0b2")]
 
     def opener(_request, timeout):
         return _Response(json.dumps(payload).encode("utf-8"))
 
-    assert discover_latest_release("0.1.0b2", opener=opener) is None
-    assert discover_latest_release("0.1.0b3", opener=opener) is None
+    assert release_updates.discover_latest_release("0.1.0b2", opener=opener) is None
+    assert release_updates.discover_latest_release("0.1.0b3", opener=opener) is None
 
 
-def test_discover_latest_release_rejects_invalid_installed_version():
+def test_release_updates.discover_latest_release_rejects_invalid_installed_version():
     with pytest.raises(ValueError, match="Installed PFA version is invalid"):
-        discover_latest_release("not-a-version", opener=lambda *_args, **_kwargs: _Response(b"[]"))
+        release_updates.discover_latest_release("not-a-version", opener=lambda *_args, **_kwargs: _Response(b"[]"))
 
 
-def test_load_installation_build_info_requires_matching_portable_metadata(tmp_path: Path):
+def test_release_updates.load_installation_build_info_requires_matching_portable_metadata(tmp_path: Path):
     (tmp_path / "BUILD-INFO.json").write_text(
         json.dumps(
             {
@@ -97,7 +92,7 @@ def test_load_installation_build_info_requires_matching_portable_metadata(tmp_pa
         encoding="utf-8",
     )
 
-    metadata = load_installation_build_info(tmp_path)
+    metadata = release_updates.load_installation_build_info(tmp_path)
 
     assert metadata == {
         "version": "0.1.0b1",
@@ -106,7 +101,7 @@ def test_load_installation_build_info_requires_matching_portable_metadata(tmp_pa
     }
 
 
-def test_load_installation_build_info_rejects_wrong_product(tmp_path: Path):
+def test_release_updates.load_installation_build_info_rejects_wrong_product(tmp_path: Path):
     (tmp_path / "BUILD-INFO.json").write_text(
         json.dumps(
             {
@@ -119,10 +114,10 @@ def test_load_installation_build_info_rejects_wrong_product(tmp_path: Path):
         encoding="utf-8",
     )
 
-    assert load_installation_build_info(tmp_path) is None
+    assert release_updates.load_installation_build_info(tmp_path) is None
 
 
-def test_download_update_bundle_verifies_archive_and_updater_hashes(tmp_path: Path):
+def test_release_updates.download_update_bundle_verifies_archive_and_updater_hashes(tmp_path: Path):
     archive_bytes = b"portable update archive bytes"
     updater_bytes = b"Write-Host 'verified updater'"
     checksum_bytes = (
@@ -140,7 +135,7 @@ def test_download_update_bundle_verifies_archive_and_updater_hashes(tmp_path: Pa
         assert timeout == 60.0
         return _Response(contents[request.full_url])
 
-    release = ReleaseUpdate(
+    release = release_updates.ReleaseUpdate(
         tag_name="v0.1.0b2",
         version="0.1.0b2",
         name="PFA update",
@@ -153,7 +148,7 @@ def test_download_update_bundle_verifies_archive_and_updater_hashes(tmp_path: Pa
         },
     )
 
-    bundle = download_update_bundle(
+    bundle = release_updates.download_update_bundle(
         release,
         destination=tmp_path / "download",
         opener=opener,
@@ -166,7 +161,7 @@ def test_download_update_bundle_verifies_archive_and_updater_hashes(tmp_path: Pa
     assert progress[-1] == 100
 
 
-def test_download_update_bundle_rejects_modified_updater_script(tmp_path: Path):
+def test_release_updates.download_update_bundle_rejects_modified_updater_script(tmp_path: Path):
     archive_bytes = b"portable update archive bytes"
     checksum_bytes = (
         f"{hashlib.sha256(archive_bytes).hexdigest()}  PFA-Windows-x64.zip\n"
@@ -181,7 +176,7 @@ def test_download_update_bundle_rejects_modified_updater_script(tmp_path: Path):
     def opener(request, timeout):
         return _Response(contents[request.full_url])
 
-    release = ReleaseUpdate(
+    release = release_updates.ReleaseUpdate(
         tag_name="v0.1.0b2",
         version="0.1.0b2",
         name="PFA update",
@@ -195,4 +190,4 @@ def test_download_update_bundle_rejects_modified_updater_script(tmp_path: Path):
     )
 
     with pytest.raises(ValueError, match="SHA-256 mismatch for Update-PFA-Portable.ps1"):
-        download_update_bundle(release, destination=tmp_path / "download", opener=opener)
+        release_updates.download_update_bundle(release, destination=tmp_path / "download", opener=opener)

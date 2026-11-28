@@ -228,7 +228,10 @@ def test_load_and_compensation_families_have_distinct_glyphs_and_unresolved_stat
     assert 'data-family="capacitor" data-model-state="unresolved"' in svg
     assert 'data-family="reactor" data-model-state="unresolved"' in svg
     assert 'data-family="compensation" data-model-state="unresolved"' in svg
+    assert "LOAD-01‡" in svg
+    assert "CAP-BANK-01†" in svg
     assert "Equipment parameters unresolved" in svg
+    assert 'fill="#FFF7ED"' not in svg
 
 
 def test_rotated_busbar_bounds_are_not_rotated_twice_in_svg():

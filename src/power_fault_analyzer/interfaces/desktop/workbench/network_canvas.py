@@ -357,9 +357,8 @@ class CanonicalEquipmentSymbol(QGraphicsObject):
             "disconnector": 4.5 * LABEL_SCENE_UNITS_PER_PT,
             "earthing_switch": 11.0 * LABEL_SCENE_UNITS_PER_PT,
         }.get(self.family, 8.0)
-        status_extension = 24.0 if self.state in {"unresolved", "partial-data"} else 8.0
-        local_half_width = self.width / 2.0 + max(8.0, switch_extension, status_extension)
-        local_half_height = self.height / 2.0 + max(8.0, status_extension)
+        local_half_width = self.width / 2.0 + max(8.0, switch_extension)
+        local_half_height = self.height / 2.0 + 8.0
         half_width = (
             abs(math.cos(angle)) * local_half_width
             + abs(math.sin(angle)) * local_half_height
@@ -480,23 +479,6 @@ class CanonicalEquipmentSymbol(QGraphicsObject):
                 QPointF(-metrics.horizontalAdvance("?") / 2.0,
                         3.0 * scene_scale),
                 "?",
-            )
-        if self.state in {"unresolved", "partial-data"}:
-            badge_x = self.width / 2.0 + 4.0 * scene_scale
-            badge_y = -self.height / 2.0 - 4.0 * scene_scale
-            badge_radius = 4.0 * scene_scale
-            painter.setPen(QPen(QColor("#D97706"), 0.8 * scene_scale))
-            painter.setBrush(QBrush(QColor("#FFF7ED")))
-            painter.drawEllipse(QPointF(badge_x, badge_y), badge_radius, badge_radius)
-            mark = "?" if self.state == "unresolved" else "!"
-            badge_font = _scene_font("Segoe UI", 6.0, QFont.Weight.Bold)
-            painter.setFont(badge_font)
-            metrics = QFontMetricsF(badge_font)
-            painter.setPen(QPen(QColor("#9A3412"), 0.6 * scene_scale))
-            painter.drawText(
-                QPointF(badge_x - metrics.horizontalAdvance(mark) / 2.0,
-                        badge_y + metrics.ascent() * 0.34),
-                mark,
             )
         painter.restore()
 
@@ -831,39 +813,6 @@ class BranchSymbol(QGraphicsPathItem):
         self.label_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
         self.label_item.setZValue(5)
         self._initializing = False
-
-    def boundingRect(self) -> QRectF:
-        bounds = super().boundingRect()
-        if self.state in {"unresolved", "partial-data"}:
-            bounds = bounds.united(QRectF(-30.0, -15.0, 30.0, 30.0))
-        return bounds
-
-    def paint(self, painter: QPainter, option, widget=None) -> None:
-        super().paint(painter, option, widget)
-        if self.state not in {"unresolved", "partial-data"}:
-            return
-        path_bounds = self.path().boundingRect()
-        if path_bounds.height() >= path_bounds.width():
-            center = QPointF(-15.0, 0.0)
-        else:
-            center = QPointF(0.0, -15.0)
-        radius = 5.0 * LABEL_SCENE_UNITS_PER_PT
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(QColor("#D97706"), 0.8 * LABEL_SCENE_UNITS_PER_PT))
-        painter.setBrush(QBrush(QColor("#FFF7ED")))
-        painter.drawEllipse(center, radius, radius)
-        mark = "?" if self.state == "unresolved" else "!"
-        font = _scene_font("Segoe UI", 6.0, QFont.Weight.Bold)
-        painter.setFont(font)
-        metrics = QFontMetricsF(font)
-        painter.setPen(QPen(QColor("#9A3412"), 0.6 * LABEL_SCENE_UNITS_PER_PT))
-        painter.drawText(
-            QPointF(center.x() - metrics.horizontalAdvance(mark) / 2.0,
-                    center.y() + metrics.ascent() * 0.34),
-            mark,
-        )
-        painter.restore()
 
     @property
     def moved(self):

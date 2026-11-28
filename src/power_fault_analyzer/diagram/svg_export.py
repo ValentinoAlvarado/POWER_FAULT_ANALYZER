@@ -348,21 +348,6 @@ def render_svg(
                 f'<text x="0" y="{_f(3.0 * scene_per_pt)}" text-anchor="middle" '
                 f'font-size="{_f(6.0 * scene_per_pt)}" fill="#172033" stroke="none">?</text>'
             )
-        if symbol.model_state in {"unresolved", "partial-data"}:
-            badge_x = width / 2.0 + 4.0 * scene_per_pt
-            badge_y = -height / 2.0 - 4.0 * scene_per_pt
-            badge_radius = 4.0 * scene_per_pt
-            badge = "?" if symbol.model_state == "unresolved" else "!"
-            lines.append(
-                f'<circle cx="{_f(badge_x)}" cy="{_f(badge_y)}" r="{_f(badge_radius)}" '
-                'fill="#FFF7ED" stroke="#D97706" stroke-width="1.0"/>'
-            )
-            lines.append(
-                f'<text x="{_f(badge_x)}" y="{_f(badge_y + 2.2 * scene_per_pt)}" '
-                'text-anchor="middle" fill="#9A3412" stroke="none" '
-                f'font-size="{_f(6.0 * scene_per_pt)}" font-weight="700">{badge}</text>'
-            )
-
         # Terminal markers are independent geometry tied to canonical terminal IDs.
         terminal_markers_embedded = symbol.family in {
             "transformer", "circuit_breaker", "disconnector", "earthing_switch", "junction", "connection_node"

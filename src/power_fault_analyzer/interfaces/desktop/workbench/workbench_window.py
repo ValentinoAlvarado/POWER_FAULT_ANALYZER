@@ -3787,13 +3787,22 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
             pass
 
         if state == "ready":
+            try:
+                # Acknowledge the handoff before closing. The PowerShell updater waits
+                # for this exact state, eliminating the race between "ready" and exit.
+                status_path.write_text("accepted", encoding="utf-8")
+            except OSError as exc:
+                self._fail_portable_update_handoff(
+                    f"PFA could not acknowledge the updater handoff: {exc}"
+                )
+                return
             if self._update_handoff_timer is not None:
                 self._update_handoff_timer.stop()
                 self._update_handoff_timer.deleteLater()
                 self._update_handoff_timer = None
             self._update_shutdown_approved = True
             self.statusBar().showMessage(
-                "Updater is ready. Closing PFA so the verified replacement can be applied…"
+                "Updater accepted the handoff. Closing PFA for the verified replacement…"
             )
             QTimer.singleShot(0, self.close)
             return

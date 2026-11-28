@@ -18,9 +18,10 @@ function Invoke-Checked {
     }
 }
 
-Invoke-Checked 'Ruff, compilation, full test suite and pinned QET renderer' {
-    & (Join-Path $PSScriptRoot 'verify_qet_symbol_importer.ps1')
-}
+Write-Host '== Ruff, compilation, full test suite and pinned QET renderer ==' -ForegroundColor Cyan
+# The child PowerShell script performs explicit checks after each native Python
+# invocation and throws on failure. Do not inspect LASTEXITCODE after a .ps1 call.
+& (Join-Path $PSScriptRoot 'verify_qet_symbol_importer.ps1')
 Invoke-Checked 'Compile source, tests and scripts' {
     & $Python -m compileall -q src tests scripts
 }

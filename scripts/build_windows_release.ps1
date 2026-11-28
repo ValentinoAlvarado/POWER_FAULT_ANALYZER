@@ -12,94 +12,106 @@ function Invoke-Checked {
     param([string]$Name, [scriptblock]$Command)
     Write-Host "== $Name ==" -ForegroundColor Cyan
     & $Command
-    if ($LASTEXITCODE -ne 0) { throw "$Name failed with exit code $LASTEXITCODE." }
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Name failed with exit code $LASTEXITCODE."
+    }
 }
 
-$PythonLocation = $env:pythonLocation
-if (-not [string]::IsNullOrWhiteSpace($PythonLocation)) {
-    # setup-python provides this exact interpreter path. Do not resolve "python"
-    # from PATH because setup-msys2 may prepend its own Python installation.
-    $BootstrapPython = Join-Path $PythonLocation 'python.exe'
+$BootstrapPython = $env:pythonLocation
+if (-not [string]::IsNullOrWhiteSpace($BootstrapPython)) {
+    $BootstrapPython = Join-Path $BootstrapPython 'python.exe'
     if (-not (Test-Path -LiteralPath $BootstrapPython -PathType Leaf)) {
         throw "setup-python interpreter not found: $BootstrapPython"
     }
 }
 else {
-    # Local builds outside GitHub Actions retain the normal PATH fallback.
     $BootstrapPython = (Get-Command python -ErrorAction Stop).Source
 }
 
 $Python = Join-Path $RepositoryRoot '.venv\Scripts\python.exe'
-$VenvPath = Join-Path $RepositoryRoot '.venv'
-Write-Host "Bootstrap Python: $BootstrapPython"
-
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
-    Write-Host "Creating isolated release environment: $VenvPath"
-    & $BootstrapPython -m venv $VenvPath
-    $venvExitCode = $LASTEXITCODE
-    if ($venvExitCode -ne 0) {
-        throw "Unable to create the isolated release virtual environment (exit code $venvExitCode)."
-    }
+    Write-Host 'Creating isolated release virtual environment...'
+    & $BootstrapPython -m venv (Join-Path $RepositoryRoot '.venv')
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to create the release virtual environment.' }
 }
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
-    throw "Release virtual environment was not created. Expected interpreter: $Python"
+    throw "Release interpreter missing: $Python"
 }
 $pythonVersion = & $Python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-if ($LASTEXITCODE -ne 0 -or $pythonVersion -ne '3.13') { throw "Release build requires Python 3.13; detected $pythonVersion." }
+if ($LASTEXITCODE -ne 0 -or $pythonVersion -ne '3.13') {
+    throw "Release requires Python 3.13; detected $pythonVersion."
+}
 $pythonArch = & $Python -c "import struct; print(struct.calcsize('P') * 8)"
-if ($LASTEXITCODE -ne 0 -or $pythonArch -ne '64') { throw "Release build requires 64-bit Python; detected $pythonArch-bit." }
+if ($LASTEXITCODE -ne 0 -or $pythonArch -ne '64') {
+    throw "Release requires 64-bit Python; detected $pythonArch-bit."
+}
 
 $license = Join-Path $RepositoryRoot 'LICENSE'
-if (-not (Test-Path $license) -or (Get-Item $license).Length -lt 30000) { throw 'GPL license text is missing or incomplete.' }
 $notice = Join-Path $RepositoryRoot 'NOTICE.md'
-if (-not (Test-Path $notice)) { throw 'NOTICE.md is required for third-party redistribution notices.' }
+$licenseDirectory = Join-Path $RepositoryRoot 'LICENSES'
 $manifest = Join-Path $RepositoryRoot 'RESEARCH\qelectrotech-symbol-candidates.csv'
 $assetRoot = Join-Path $RepositoryRoot 'assets\third_party\qelectrotech-elements'
-if (-not (Test-Path $manifest)) { throw "Missing pinned QET manifest: $manifest" }
-if (-not (Test-Path (Join-Path $assetRoot 'ELEMENTS.LICENSE'))) {
+foreach ($required in @($license, $notice, $manifest)) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+        throw "Required release input is missing: $required"
+    }
+}
+if ((Get-Item -LiteralPath $license).Length -lt 30000) {
+    throw 'Root LICENSE is incomplete; expected the complete GPL-3.0 text and project notice.'
+}
+if (-not (Test-Path -LiteralPath $licenseDirectory -PathType Container)) {
+    throw 'LICENSES directory is required for third-party redistribution notices.'
+}
+if (-not (Test-Path -LiteralPath (Join-Path $assetRoot 'ELEMENTS.LICENSE'))) {
+    # The acquisition script reports failures with terminating PowerShell errors.
+    # LASTEXITCODE is only meaningful after a native executable has run.
     & (Join-Path $PSScriptRoot 'Acquire-QElectroTechSymbolSeed.ps1') -RepositoryRoot $RepositoryRoot
-    if ($LASTEXITCODE -ne 0) { throw 'QET source seed acquisition failed.' }
 }
 
 $releaseVersion = $env:PFA_RELEASE_VERSION
 if ([string]::IsNullOrWhiteSpace($releaseVersion)) {
     $toml = Get-Content (Join-Path $RepositoryRoot 'pyproject.toml') -Raw
-    $match = [regex]::Match($toml, '(?m)^version\s*=\s*"([^"]+)"')
+    $match = [regex]::Match($toml, '(?m)^version\s*=\s*(?:"([^"]+)"|''([^'']+)'')\s*$')
     if (-not $match.Success) { throw 'Could not read project version from pyproject.toml.' }
-    $releaseVersion = "v$($match.Groups[1].Value)"
+    $parsedVersion = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+    $releaseVersion = "v$parsedVersion"
 }
-$releaseVersion = $releaseVersion.Trim()
-if ($releaseVersion.StartsWith('v')) { $displayVersion = $releaseVersion.Substring(1) } else { $displayVersion = $releaseVersion }
-$numericVersion = [regex]::Match($displayVersion, '^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)')
-if (-not $numericVersion.Success) { throw "Invalid release version: $displayVersion" }
-$versionResource = "$($numericVersion.Groups['major'].Value).$($numericVersion.Groups['minor'].Value).$($numericVersion.Groups['patch'].Value).0"
+$displayVersion = $releaseVersion.Trim()
+if ($displayVersion.StartsWith('v')) { $displayVersion = $displayVersion.Substring(1) }
 
-Invoke-Checked 'Install development, desktop, reporting and release dependencies' {
+Invoke-Checked 'Install exact project release dependencies' {
     & $Python -m pip install --upgrade pip
     if ($LASTEXITCODE -ne 0) { throw 'pip upgrade failed.' }
     & $Python -m pip install -e '.[dev,desktop,reports,release]'
 }
+
 if (-not $SkipTests) {
-    Invoke-Checked 'Consolidated PFA transaction, property, route, keyboard and transformer acceptance' {
-        & (Join-Path $PSScriptRoot 'VERIFY_PFA_PRODUCT_CONSOLIDATED_001.ps1') -RepositoryRoot $RepositoryRoot
+    Invoke-Checked 'Ruff source and test checks' {
+        & $Python -m ruff check src tests examples
     }
-    Invoke-Checked 'Pinned QElectroTech import and Qt renderer acceptance' {
-        & (Join-Path $PSScriptRoot 'verify_qet_symbol_importer.ps1')
+    Invoke-Checked 'Compile source, tests, examples and scripts' {
+        & $Python -m compileall -q src tests examples scripts
     }
-    Invoke-Checked 'Desktop application startup smoke test' {
-        & $Python (Join-Path $PSScriptRoot 'smoke_test_app_reboot_005.py')
+    Invoke-Checked 'Complete pytest suite' {
+        & $Python -m pytest -q
     }
+    Write-Host '== APP-REBOOT-005 desktop, QElectroTech and Qt acceptance ==' -ForegroundColor Cyan
+    # The verifier is a PowerShell script that owns its native-command exit checks.
+    & (Join-Path $PSScriptRoot 'verify_app_reboot_005.ps1')
 }
 
 $distRoot = Join-Path $RepositoryRoot 'dist'
+$appFolder = Join-Path $distRoot 'POWER_FAULT_ANALYZER'
 $workPath = Join-Path $distRoot 'pyinstaller-work'
 $specPath = Join-Path $distRoot 'pyinstaller-spec'
-$appFolder = Join-Path $distRoot 'POWER_FAULT_ANALYZER'
 New-Item -ItemType Directory -Force -Path $distRoot | Out-Null
-if (Test-Path $appFolder) { Remove-Item $appFolder -Recurse -Force }
-if (Test-Path $workPath) { Remove-Item $workPath -Recurse -Force }
+foreach ($generated in @($appFolder, $workPath, $specPath)) {
+    if (Test-Path -LiteralPath $generated) {
+        Remove-Item -LiteralPath $generated -Recurse -Force
+    }
+}
 
-Invoke-Checked 'Build standalone Windows x64 application with PyInstaller' {
+Invoke-Checked 'Build standalone Windows x64 desktop application' {
     & $Python -m PyInstaller --noconfirm --clean --windowed --onedir `
         --name POWER_FAULT_ANALYZER `
         --paths src `
@@ -116,6 +128,8 @@ Invoke-Checked 'Build standalone Windows x64 application with PyInstaller' {
         --collect-all matplotlib `
         --collect-all pyqtgraph `
         --collect-all qtawesome `
+        --collect-all cairosvg `
+        --collect-all cairocffi `
         --collect-data power_fault_analyzer `
         --add-data "$manifest;RESEARCH" `
         --add-data "$assetRoot;assets/third_party/qelectrotech-elements" `
@@ -123,75 +137,171 @@ Invoke-Checked 'Build standalone Windows x64 application with PyInstaller' {
         --specpath $specPath `
         src/power_fault_analyzer/interfaces/desktop/app.py
 }
-if (-not (Test-Path (Join-Path $appFolder 'POWER_FAULT_ANALYZER.exe'))) { throw 'PyInstaller completed without the expected executable.' }
-Invoke-Checked 'Frozen Windows application startup smoke test' {
-    & (Join-Path $PSScriptRoot 'verify_frozen_windows_app.ps1') -Executable (Join-Path $appFolder 'POWER_FAULT_ANALYZER.exe')
+
+$executable = Join-Path $appFolder 'POWER_FAULT_ANALYZER.exe'
+if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+    throw 'PyInstaller completed without POWER_FAULT_ANALYZER.exe.'
+}
+if (-not $SkipTests) {
+    Write-Host '== Frozen Windows executable startup acceptance ==' -ForegroundColor Cyan
+    # The verifier throws if the frozen process exits during the startup window.
+    & (Join-Path $PSScriptRoot 'verify_frozen_windows_app.ps1') -Executable $executable
+    & (Join-Path $PSScriptRoot 'verify_frozen_script_worker.ps1') -Executable $executable
 }
 
-$releaseDirectory = Join-Path $RepositoryRoot $OutputDirectory
-if (Test-Path $releaseDirectory) { Remove-Item $releaseDirectory -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
+Copy-Item -LiteralPath $license -Destination $appFolder -Force
+Copy-Item -LiteralPath $notice -Destination $appFolder -Force
+Copy-Item -LiteralPath (Join-Path $RepositoryRoot 'README.md') -Destination $appFolder -Force
+Copy-Item -LiteralPath (Join-Path $RepositoryRoot 'docs/engineering/THIRD_PARTY_LICENSE_REGISTER.md') -Destination $appFolder -Force
+$packagedLicenseDirectory = Join-Path $appFolder 'LICENSES'
+New-Item -ItemType Directory -Force -Path $packagedLicenseDirectory | Out-Null
+Copy-Item -Path (Join-Path $licenseDirectory '*') -Destination $packagedLicenseDirectory -Recurse -Force
 
-Copy-Item $license $appFolder -Force
-Copy-Item $notice $appFolder -Force
-Copy-Item (Join-Path $RepositoryRoot 'README.md') $appFolder -Force
-Copy-Item (Join-Path $RepositoryRoot 'docs/engineering/THIRD_PARTY_LICENSE_REGISTER.md') $appFolder -Force
-Copy-Item (Join-Path $RepositoryRoot 'docs/engineering/THIRD_PARTY_LICENSE_REGISTER.md') (Join-Path $releaseDirectory 'THIRD_PARTY_NOTICES.md') -Force
-Copy-Item (Join-Path $RepositoryRoot 'LICENSES') $appFolder -Recurse -Force
+$releaseDirectory = Join-Path $RepositoryRoot $OutputDirectory
+New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
+$thirdPartyNotices = Join-Path $releaseDirectory 'THIRD_PARTY_NOTICES.md'
+Copy-Item -LiteralPath (Join-Path $RepositoryRoot 'docs/engineering/THIRD_PARTY_LICENSE_REGISTER.md') -Destination $thirdPartyNotices -Force
+$updater = Join-Path $releaseDirectory 'Update-PFA-Portable.ps1'
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Update-PFA-Portable.ps1') -Destination $updater -Force
 
 Invoke-Checked 'Generate CycloneDX dependency inventory' {
     & $Python (Join-Path $PSScriptRoot 'generate_release_sbom.py') --output (Join-Path $releaseDirectory 'SBOM.cdx.json') --version $displayVersion
 }
-Invoke-Checked 'Generate Python dependency license inventory' {
+Invoke-Checked 'Generate exact Python dependency license inventory' {
     & $Python (Join-Path $PSScriptRoot 'generate_python_license_report.py') --output (Join-Path $releaseDirectory 'PYTHON-DEPENDENCY-LICENSES.md')
 }
-Copy-Item (Join-Path $releaseDirectory 'SBOM.cdx.json') $appFolder -Force
-Copy-Item (Join-Path $releaseDirectory 'PYTHON-DEPENDENCY-LICENSES.md') $appFolder -Force
+Copy-Item -LiteralPath (Join-Path $releaseDirectory 'SBOM.cdx.json') -Destination $appFolder -Force
+Copy-Item -LiteralPath (Join-Path $releaseDirectory 'PYTHON-DEPENDENCY-LICENSES.md') -Destination $appFolder -Force
+Copy-Item -LiteralPath $thirdPartyNotices -Destination $appFolder -Force
+
+$gitCommit = 'unknown'
+$gitOutput = & git -C $RepositoryRoot rev-parse HEAD 2>$null
+if ($LASTEXITCODE -eq 0 -and $gitOutput) { $gitCommit = ([string]$gitOutput).Trim() }
 $buildInfo = [ordered]@{
     product = 'POWER_FAULT_ANALYZER'
     version = $displayVersion
-    release_tag = $releaseVersion
     python = (& $Python --version 2>&1 | Out-String).Trim()
     architecture = 'x64'
     license = 'GPL-3.0-or-later'
+    git_commit = $gitCommit
     built_utc = [DateTime]::UtcNow.ToString('o')
     repository = 'https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER'
-    artifacts = @('PFA-Setup-x64.exe','PFA-Windows-x64.zip','SHA256SUMS.txt','SBOM.cdx.json','PYTHON-DEPENDENCY-LICENSES.md')
+    distribution = 'Windows x64 PyInstaller onedir package with per-user NSIS installer; in-app updates replace the installed application in place'
+    artifacts = @('PFA-Setup-x64.exe', 'PFA-Windows-x64.zip', 'SHA256SUMS.txt', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json', 'Update-PFA-Portable.ps1')
 }
-$buildInfo | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $appFolder 'BUILD-INFO.json') -Encoding UTF8
-$buildInfo | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $releaseDirectory 'BUILD-INFO.json') -Encoding UTF8
+$buildInfoPath = Join-Path $releaseDirectory 'BUILD-INFO.json'
+$buildInfo | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $buildInfoPath -Encoding UTF8
+Copy-Item -LiteralPath $buildInfoPath -Destination $appFolder -Force
 
-# Portable onedir ZIP remains available alongside the user-friendly setup EXE.
 $zipPath = Join-Path $releaseDirectory 'PFA-Windows-x64.zip'
+if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 Compress-Archive -Path (Join-Path $appFolder '*') -DestinationPath $zipPath -CompressionLevel Optimal
+if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf) -or (Get-Item -LiteralPath $zipPath).Length -le 0) {
+    throw 'Portable Windows ZIP was not created or is empty.'
+}
 
-$makensis = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source
-if (-not $makensis) {
-    $candidate = 'C:\Program Files (x86)\NSIS\makensis.exe'
-    if (Test-Path $candidate) { $makensis = $candidate }
+# Build a per-user setup executable from the same verified onedir payload.
+# The portable ZIP remains the payload used by the in-app updater.
+$makensis = $env:PFA_MAKENSIS_PATH
+if ([string]::IsNullOrWhiteSpace($makensis) -or -not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+    $command = Get-Command makensis.exe -ErrorAction SilentlyContinue
+    if ($command) { $makensis = $command.Source }
 }
-if (-not $makensis) { throw 'NSIS compiler not found. Install NSIS 3.x before building the setup executable.' }
+if ([string]::IsNullOrWhiteSpace($makensis) -or -not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+    $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
+    $candidate = Join-Path $programFilesX86 'NSIS\makensis.exe'
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        $makensis = $candidate
+    }
+    else {
+        $candidate = Join-Path $env:ProgramFiles 'NSIS\makensis.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { $makensis = $candidate }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($makensis) -or -not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+    throw "NSIS makensis.exe is required to build PFA-Setup-x64.exe. Detected path: '$makensis'."
+}
+
+$resourceMatch = [regex]::Match(
+    $displayVersion,
+    '^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:(?<pre>a|b|rc)(?<number>\d+))?$'
+)
+if (-not $resourceMatch.Success) {
+    throw "Version '$displayVersion' cannot be represented in the Windows four-part file version."
+}
+$resourceRevision = 0
+if ($resourceMatch.Groups['number'].Success) {
+    $preNumber = [int]$resourceMatch.Groups['number'].Value
+    $resourceRevision = switch ($resourceMatch.Groups['pre'].Value) {
+        'a'  { 1000 + $preNumber }
+        'b'  { 20000 + $preNumber }
+        'rc' { 40000 + $preNumber }
+    }
+}
+if ($resourceRevision -gt 65535) { throw 'Pre-release sequence exceeds Windows file-version limits.' }
+$versionParts = @([int]$resourceMatch.Groups['major'].Value, [int]$resourceMatch.Groups['minor'].Value, [int]$resourceMatch.Groups['patch'].Value, [int]$resourceRevision)
+if ($versionParts | Where-Object { $_ -gt 65535 }) { throw 'Version component exceeds Windows file-version limits.' }
+$resourceVersion = '{0}.{1}.{2}.{3}' -f $resourceMatch.Groups['major'].Value, $resourceMatch.Groups['minor'].Value, $resourceMatch.Groups['patch'].Value, $resourceRevision
 $setupPath = Join-Path $releaseDirectory 'PFA-Setup-x64.exe'
-$appLicensePath = Join-Path $appFolder 'LICENSE'
-if (-not (Test-Path -LiteralPath $appLicensePath -PathType Leaf)) {
-    throw "Packaged GPL license is missing before NSIS compilation: $appLicensePath"
+if (Test-Path -LiteralPath $setupPath) { Remove-Item -LiteralPath $setupPath -Force }
+$nsisArgs = @(
+    "/DAPP_VERSION=$displayVersion",
+    "/DAPP_VERSION_RESOURCE=$resourceVersion",
+    "/DAPP_SOURCE=$appFolder",
+    "/DOUTPUT_PATH=$setupPath"
+)
+Write-Host '== Build per-user Windows installer with NSIS ==' -ForegroundColor Cyan
+& $makensis @nsisArgs (Join-Path $RepositoryRoot 'installer/PFA-Setup-x64.nsi')
+if ($LASTEXITCODE -ne 0) { throw "NSIS installer build failed with exit code $LASTEXITCODE." }
+if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf) -or (Get-Item -LiteralPath $setupPath).Length -le 0) {
+    throw 'NSIS did not produce a non-empty PFA-Setup-x64.exe.'
 }
-Invoke-Checked 'Compile NSIS Windows installer' {
-    # NSIS resolves compile-time input paths independently of PowerShell's
-    # current directory. Pass absolute paths so LicenseData and File /r use
-    # the exact staged application directory on every runner.
-    & $makensis "/DAPP_VERSION=$displayVersion" "/DAPP_VERSION_RESOURCE=$versionResource" "/DAPP_SOURCE=$appFolder" "/DOUTPUT_PATH=$setupPath" (Join-Path $RepositoryRoot 'installer/PFA-Setup-x64.nsi')
+
+# Smoke-test a silent first-time install and uninstall on the Windows runner.
+$installerSmokeRoot = Join-Path $env:SystemDrive ("PFA-Installer-Acceptance-" + [guid]::NewGuid().ToString('N'))
+try {
+    $installerProcess = Start-Process -FilePath $setupPath -ArgumentList @('/S', "/D=$installerSmokeRoot") -Wait -PassThru
+    if ($installerProcess.ExitCode -ne 0) { throw "Silent NSIS install failed with exit code $($installerProcess.ExitCode)." }
+    $installedExe = Join-Path $installerSmokeRoot 'POWER_FAULT_ANALYZER.exe'
+    $installedInfoPath = Join-Path $installerSmokeRoot 'BUILD-INFO.json'
+    if (-not (Test-Path -LiteralPath $installedExe -PathType Leaf) -or -not (Test-Path -LiteralPath $installedInfoPath -PathType Leaf)) {
+        throw 'NSIS installation did not deploy the executable and build metadata.'
+    }
+    $installedInfo = Get-Content -LiteralPath $installedInfoPath -Raw | ConvertFrom-Json
+    if ($installedInfo.product -ne 'POWER_FAULT_ANALYZER' -or $installedInfo.version -ne $displayVersion -or $installedInfo.architecture -ne 'x64') {
+        throw 'NSIS installation deployed unexpected product/version/architecture metadata.'
+    }
+    $uninstaller = Join-Path $installerSmokeRoot 'Uninstall.exe'
+    if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'NSIS installation did not create its uninstaller.' }
+    $uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+    if ($uninstallProcess.ExitCode -ne 0) { throw "Silent NSIS uninstall failed with exit code $($uninstallProcess.ExitCode)." }
+    if (Test-Path -LiteralPath $installedExe) { throw 'NSIS uninstaller left POWER_FAULT_ANALYZER.exe behind.' }
+    Write-Host 'PASS NSIS installer deployed the expected application and uninstaller removed it.' -ForegroundColor Green
 }
-if (-not (Test-Path $setupPath)) { throw 'NSIS did not create PFA-Setup-x64.exe.' }
+finally {
+    if (Test-Path -LiteralPath $installerSmokeRoot) {
+        Remove-Item -LiteralPath $installerSmokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 
 $hashLines = @()
-foreach ($fileName in @('PFA-Setup-x64.exe','PFA-Windows-x64.zip','SBOM.cdx.json','PYTHON-DEPENDENCY-LICENSES.md','THIRD_PARTY_NOTICES.md','BUILD-INFO.json')) {
+foreach ($fileName in @('PFA-Setup-x64.exe', 'PFA-Windows-x64.zip', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json', 'Update-PFA-Portable.ps1')) {
     $path = Join-Path $releaseDirectory $fileName
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release sidecar missing: $path" }
     $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
     $hashLines += "$hash  $fileName"
 }
-$hashLines | Set-Content (Join-Path $releaseDirectory 'SHA256SUMS.txt') -Encoding ASCII
-Copy-Item (Join-Path $releaseDirectory 'SHA256SUMS.txt') $appFolder -Force
-Write-Host "Windows setup created: $setupPath" -ForegroundColor Green
-Write-Host "Portable bundle created: $zipPath" -ForegroundColor Green
-Write-Host 'Release artifacts and SHA-256 checksums generated.' -ForegroundColor Green
+$checksumPath = Join-Path $releaseDirectory 'SHA256SUMS.txt'
+$hashLines | Set-Content -LiteralPath $checksumPath -Encoding ASCII
+
+if (-not $SkipTests) {
+    Write-Host '== Portable updater success, checksum and rollback acceptance ==' -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot 'verify_portable_updater.ps1') `
+        -UpdaterScript $updater `
+        -ZipPath $zipPath `
+        -ChecksumPath $checksumPath
+}
+
+Write-Host "Portable Windows package: $zipPath" -ForegroundColor Green
+Write-Host "Release sidecars: $releaseDirectory" -ForegroundColor Green
+Write-Host 'No NSIS installer is generated by this portable-ZIP release workflow.' -ForegroundColor Yellow

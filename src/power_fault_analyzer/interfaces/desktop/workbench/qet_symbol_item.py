@@ -12,6 +12,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QStyleOptionGraphicsItem, QWidget
 
+from power_fault_analyzer.diagram.layout import Point, snap_point
 from power_fault_analyzer.infrastructure.symbols.qet_elmt import (
     QETSymbolFormatError,
     SymbolDefinition,
@@ -74,6 +75,7 @@ class QETSymbolItem(QGraphicsObject):
         if not 2.0 <= self.grid_spacing <= 200.0:
             raise ValueError("grid_spacing must be between 2 and 200 scene units.")
         self._drag_start = QPointF()
+        self._dragging = False
         # QET primitive coordinates are translated by the declared hotspot in
         # paint().  The clickable/paintable bounds must use that same translated
         # coordinate system.  A number of upstream elements have primitives
@@ -128,25 +130,30 @@ class QETSymbolItem(QGraphicsObject):
 
     def mousePressEvent(self, event) -> None:
         self._drag_start = self.pos()
+        self._dragging = self._interactive
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        super().mouseReleaseEvent(event)
-        if not self._interactive or self.instance_id is None:
-            return
-        current = self.pos()
-        if (current - self._drag_start).manhattanLength() > 0.1:
-            self.position_committed.emit(
-                str(self.instance_id),
-                self._drag_start.x(),
-                self._drag_start.y(),
-                current.x(),
-                current.y(),
-            )
+        try:
+            super().mouseReleaseEvent(event)
+            if not self._interactive or self.instance_id is None:
+                return
+            current = self.pos()
+            if (current - self._drag_start).manhattanLength() > 0.1:
+                self.position_committed.emit(
+                    str(self.instance_id),
+                    self._drag_start.x(),
+                    self._drag_start.y(),
+                    current.x(),
+                    current.y(),
+                )
+        finally:
+            self._dragging = False
 
     def itemChange(self, change, value):
         if (
             self._interactive
+            and self._dragging
             and self.snap_enabled
             and change is QGraphicsItem.GraphicsItemChange.ItemPositionChange
         ):
@@ -154,9 +161,8 @@ class QETSymbolItem(QGraphicsObject):
             hotspot = self.transformOriginPoint()
             anchor_x = value.x() + hotspot.x()
             anchor_y = value.y() + hotspot.y()
-            snapped_x = round(anchor_x / spacing) * spacing
-            snapped_y = round(anchor_y / spacing) * spacing
-            return QPointF(snapped_x - hotspot.x(), snapped_y - hotspot.y())
+            snapped = snap_point(Point(anchor_x, anchor_y), spacing)
+            return QPointF(snapped.x - hotspot.x(), snapped.y - hotspot.y())
         return super().itemChange(change, value)
 
     def paint(
@@ -228,7 +234,7 @@ class QETSymbolItem(QGraphicsObject):
         font_string = primitive.get("font", "") or ""
         font = QFont()
         if not font_string or not font.fromString(font_string):
-            font = QFont("Segoe UI", 10)
+            font = QFont("Segoe UI", 9)
         painter.setFont(font)
         color = QColor(primitive.get("color", "black") or "black")
         painter.setPen(QPen(color if color.isValid() else QColor("black")))

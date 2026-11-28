@@ -1,14 +1,13 @@
 """Publication-oriented, editable SVG primitives for electrical diagrams."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from math import cos, radians, sin
 from html import escape
-from typing import Iterable
-
-from .symbol_catalog import get_symbol_definition
+from math import cos, radians, sin
 
 from .layout import Point, Rect
+from .symbol_catalog import get_symbol_definition
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,7 +17,7 @@ class SvgLabel:
     size_pt: float = 7.5
     anchor: str = "middle"
     identifier: str = ""
-    font_family: str = "STIX Two Text, Cambria, Times New Roman, serif"
+    font_family: str = "Segoe UI, Arial, Helvetica, sans-serif"
     weight: str = "normal"
     color: str = "#172033"
     rotation_deg: float = 0.0
@@ -53,6 +52,7 @@ class SvgSymbol:
     provenance: str = ""
     source_license: str = ""
     definition_hash: str = ""
+    model_state: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,18 +126,24 @@ def render_svg(
     title = escape(metadata.title)
     description = escape(metadata.description)
     lines = [
-        '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" '
-        f'width="{_f(width_mm)}mm" height="{_f(height_mm)}mm" '
-        f'viewBox="{_f(view_box.x)} {_f(view_box.y)} {_f(view_box.width)} {_f(view_box.height)}">',
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" '
+            f'width="{_f(width_mm)}mm" height="{_f(height_mm)}mm" '
+            f'viewBox="{_f(view_box.x)} {_f(view_box.y)} {_f(view_box.width)} {_f(view_box.height)}">'
+        ),
         f'<title>{title}</title><desc>{description}</desc>',
         '<metadata>',
-        f'<pfa:document xmlns:pfa="https://power-fault-analyzer.org/ns/diagram/1.0" '
-        f'author="{escape(metadata.author, quote=True)}" '
-        f'project="{escape(metadata.project, quote=True)}" '
-        f'revision="{escape(metadata.revision, quote=True)}" />',
+        (
+            f'<pfa:document xmlns:pfa="https://power-fault-analyzer.org/ns/diagram/1.0" '
+            f'author="{escape(metadata.author, quote=True)}" '
+            f'project="{escape(metadata.project, quote=True)}" '
+            f'revision="{escape(metadata.revision, quote=True)}" />'
+        ),
         '</metadata>',
-        f'<rect id="page-background" x="{_f(view_box.x)}" y="{_f(view_box.y)}" '
-        f'width="{_f(view_box.width)}" height="{_f(view_box.height)}" fill="#FFFFFF"/>',
+        (
+            f'<rect id="page-background" x="{_f(view_box.x)}" y="{_f(view_box.y)}" '
+            f'width="{_f(view_box.width)}" height="{_f(view_box.height)}" fill="#FFFFFF"/>'
+        ),
     ]
     if show_grid:
         lines.append('<g id="editor-grid" fill="none" stroke="#E8EDF2" stroke-width="0.25">')
@@ -181,6 +187,7 @@ def render_svg(
         lines.append(
             f'<g id="equipment-{identifier}" data-symbol-id="{definition_id}" '
             f'data-family="{escape(symbol.family, quote=True)}" '
+            f'data-model-state="{escape(symbol.model_state or "resolved", quote=True)}" '
             f'data-standard-reference="{escape(symbol.standard_reference, quote=True)}" '
             f'data-normative-status="{escape(symbol.normative_status, quote=True)}" '
             f'data-provenance="{escape(symbol.provenance, quote=True)}" '
@@ -188,7 +195,12 @@ def render_svg(
             f'data-definition-sha256="{escape(symbol.definition_hash, quote=True)}" '
             f'transform="translate({_f(cx)} {_f(cy)}) rotate({_f(symbol.orientation_deg)})">'
         )
-        if symbol.family == "busbar":
+        if symbol.family == "connection_node":
+            lines.append(
+                f'<circle cx="0" cy="0" r="{_f(2.2 * scene_per_pt)}" '
+                'fill="#172033" stroke="none"/>'
+            )
+        elif symbol.family == "busbar":
             # Busbar envelopes are already rotated in the projected document.
             if width >= height:
                 lines.append(
@@ -207,7 +219,7 @@ def render_svg(
             lines.append(
                 f'<text x="0" y="{_f(0.28 * radius)}" text-anchor="middle" '
                 'fill="#172033" stroke="none" '
-                f'font-family="STIX Two Text, Cambria, Times New Roman, serif" '
+                f'font-family="Segoe UI, Arial, Helvetica, sans-serif" '
                 f'font-size="{_f(11.0 * scene_per_pt)}">{glyph}</text>'
             )
         elif symbol.family == "transformer":
@@ -308,6 +320,27 @@ def render_svg(
                 f'<circle cx="0" cy="0" r="{_f(1.7 * scene_per_pt)}" fill="#172033" stroke="none" '
                 f'data-terminal-id="{escape(terminal_id, quote=True)}"/>'
             )
+        elif symbol.family in {"load", "capacitor", "reactor", "compensation"}:
+            definition = get_symbol_definition(symbol.family)
+            for primitive in definition.primitives:
+                if primitive.kind == "circle":
+                    px, py, radius = primitive.coordinates
+                    lines.append(
+                        f'<circle cx="{_f(px)}" cy="{_f(py)}" r="{_f(radius)}" fill="none"/>'
+                    )
+                elif primitive.kind == "line":
+                    x1, y1, x2, y2 = primitive.coordinates
+                    lines.append(
+                        f'<path d="M {_f(x1)} {_f(y1)} L {_f(x2)} {_f(y2)}" fill="none"/>'
+                    )
+            if definition.text_glyph:
+                glyph_y = 0.30 * min(width, height) / 2.0
+                lines.append(
+                    f'<text x="0" y="{_f(glyph_y)}" text-anchor="middle" '
+                    'fill="#172033" stroke="none" font-family="Segoe UI, Arial, sans-serif" '
+                    f'font-size="{_f(8.5 * scene_per_pt)}" font-weight="600">'
+                    f'{escape(definition.text_glyph)}</text>'
+                )
         elif symbol.family == "generic":
             lines.append(f'<rect x="{_f(x)}" y="{_f(y)}" width="{_f(width)}" '
                          f'height="{_f(height)}"/>')
@@ -317,7 +350,7 @@ def render_svg(
             )
         # Terminal markers are independent geometry tied to canonical terminal IDs.
         terminal_markers_embedded = symbol.family in {
-            "transformer", "circuit_breaker", "disconnector", "earthing_switch", "junction"
+            "transformer", "circuit_breaker", "disconnector", "earthing_switch", "junction", "connection_node"
         }
         for terminal_index, point in enumerate(symbol.terminal_points):
             if terminal_markers_embedded:

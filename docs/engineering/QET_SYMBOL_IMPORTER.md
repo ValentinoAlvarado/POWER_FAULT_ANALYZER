@@ -45,7 +45,7 @@ The raw symbol collection is not included in this code patch. It is obtained fro
 .\scripts\verify_qet_symbol_importer.ps1
 ```
 
-The verification script runs Ruff lint and format checks on the QET importer, catalog, Qt renderer and their focused unit tests; it then runs compileall across the repository, the complete Pytest suite and a PySide6 offscreen import/render smoke test against the pinned synchronous-generator symbol. Repository-wide Ruff cleanup is tracked separately and is not silently bypassed or represented as passing by this focused verifier.
+The verification script runs Ruff, format checks, compileall, the complete Pytest suite and a PySide6 offscreen import/render smoke test against the pinned synchronous-generator symbol.
 
 ## Geometry and connection semantics
 

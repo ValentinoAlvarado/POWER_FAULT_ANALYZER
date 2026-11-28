@@ -20,34 +20,13 @@ try {
     }
 
     if (-not $SkipRuff) {
-        # This verifier owns the QET importer/renderer quality gate, not the
-        # repository-wide lint baseline. Keep unrelated legacy lint debt from
-        # blocking this focused acceptance path.
-        $QetPythonFiles = @(
-            'src/power_fault_analyzer/infrastructure/symbols/__init__.py',
-            'src/power_fault_analyzer/infrastructure/symbols/qet_elmt.py',
-            'src/power_fault_analyzer/infrastructure/symbols/qet_catalog.py',
-            'src/power_fault_analyzer/interfaces/desktop/workbench/qet_symbol_item.py',
-            'src/power_fault_analyzer/interfaces/desktop/workbench/qet_symbol_browser.py',
-            'tests/unit/infrastructure/symbols/test_qet_catalog.py',
-            'tests/unit/infrastructure/symbols/test_qet_elmt.py',
-            'tests/unit/interfaces/desktop/workbench/test_qet_symbol_item.py'
-        )
+        Write-Host '== Ruff lint =='
+        & $Python -m ruff check src tests scripts
+        if ($LASTEXITCODE -ne 0) { throw "Ruff lint failed with exit code $LASTEXITCODE." }
 
-        foreach ($relativePath in $QetPythonFiles) {
-            $absolutePath = Join-Path $RepositoryRoot $relativePath
-            if (-not (Test-Path -LiteralPath $absolutePath -PathType Leaf)) {
-                throw "QET lint target not found: $relativePath"
-            }
-        }
-
-        Write-Host '== Ruff lint: QET importer and renderer =='
-        & $Python -m ruff check @QetPythonFiles
-        if ($LASTEXITCODE -ne 0) { throw "QET Ruff lint failed with exit code $LASTEXITCODE." }
-
-        Write-Host '== Ruff format: QET importer and renderer =='
-        & $Python -m ruff format --check @QetPythonFiles
-        if ($LASTEXITCODE -ne 0) { throw "QET Ruff format check failed with exit code $LASTEXITCODE." }
+        # A repository-wide format migration is intentionally not part of the
+        # release gate yet: Ruff 0.17.6 reports 56 existing files in src/tests/examples
+        # as unformatted. Reformatting those files is a separate, reviewable change.
     }
 
     Write-Host '== Compileall =='

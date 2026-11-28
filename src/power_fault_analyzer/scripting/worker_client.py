@@ -1,5 +1,6 @@
 """Synchronous and asynchronous clients for the separate PFA script worker."""
 from __future__ import annotations
+
 import asyncio
 import json
 import os
@@ -50,11 +51,11 @@ async def run_script_worker_async(source: str, *, timeout_seconds: float = 30.0)
             process.communicate(json.dumps({"source": source}).encode("utf-8")),
             timeout=timeout_seconds,
         )
-    except (asyncio.TimeoutError, asyncio.CancelledError):
+    except (TimeoutError, asyncio.CancelledError):
         process.terminate()
         try:
             await asyncio.wait_for(process.wait(), timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             process.kill()
             await process.wait()
         raise

@@ -1,8 +1,22 @@
 # POWER_FAULT_ANALYZER
 
-[![Windows release](https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/actions/workflows/windows-release.yml/badge.svg)](https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/actions/workflows/windows-release.yml) [![Pages](https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/actions/workflows/pages.yml/badge.svg)](https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/actions/workflows/pages.yml) [![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-A native Windows desktop workbench and Python engineering core for power-system network modelling, single-line diagrams, supported short-circuit studies and selected protection checks. The project uses Python 3.13.x, object-oriented domain modelling, DDD and hexagonal architecture. The public website is a download and documentation portal; the engineering editor runs as a desktop application.
+An extensible platform for balanced three-phase power-system short-circuit studies. The project uses Python 3.13.x, object-oriented domain modeling, DDD, and hexagonal architecture. The Windows desktop workbench is built on the application and electrical-domain core intended to support future clients.
+
+## Get the Windows application
+
+For first-time installation, use the **Windows x64 setup executable** from the project's [GitHub Releases](https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/releases). The planned `PFA-Setup-x64.exe` is a per-user installer: it installs the desktop application under the current Windows user's profile and creates Start Menu and Desktop shortcuts. End users do not need PyCharm, Python or a source checkout.
+
+After installation, the application can check GitHub Releases at startup and through **Help → Check for Updates…**. When a newer complete release is available, PFA asks before downloading, verifies the update payload, preserves projects and preferences outside the application directory, replaces the installed application in place and restarts. The previous application folder is retained as a rollback copy.
+
+The `PFA-Windows-x64.zip` is the portable onedir package and the payload used for in-app updates. It is also available to users who prefer a portable folder instead of a setup wizard.
+
+A public download is activated only after a tagged release passes the Windows build, test, license-review and artifact-verification gates. Until then, the Releases page may contain no verified installer.
+
+## Source code and contributions
+
+The source repository is public under GPL-3.0-or-later. Anyone can inspect it, fork it, modify a feature, build a development version and submit improvements through a pull request. Installing the Windows application does not include the development toolchain; contributors who want to change PFA itself should follow the source environment and test instructions below.
 
 ## Current implementation
 
@@ -73,11 +87,8 @@ pip install -e ".[api]"
 ## Tests
 
 ```powershell
-python -m compileall -q src scripts tests
-python -m pytest -q
+python -m pytest tests/unit -v
 ```
-
-The Windows release pipeline additionally runs the Qt acceptance scripts for the Workbench, property inspector, diagram routing, keyboard shortcuts and symbol rendering.
 
 ## Network domain example
 
@@ -184,9 +195,7 @@ See `docs/engineering/APP-REBOOT-001-engineering-workbench.md` for implemented s
 
 ## Desktop application and releases
 
-POWER_FAULT_ANALYZER is a native Windows desktop engineering application. The public download front door is the [PFA website](https://valentinoalvarado.github.io/POWER_FAULT_ANALYZER/); tagged releases publish a user-friendly `PFA-Setup-x64.exe` installer and a portable `PFA-Windows-x64.zip` bundle after Windows CI acceptance. The installer is initially unsigned; Windows SmartScreen may show an unknown-publisher warning. See [Public GitHub publication and Windows releases](docs/product/PUBLICATION_GUIDE.md) and [Desktop distribution and releases](docs/product/DISTRIBUTION_AND_RELEASES.md).
-
-The original PFA code is licensed under **GPL-3.0-or-later**. Qt/PySide6, QElectroTech symbols, fonts, icons and Python dependencies retain their independent licenses; see [`NOTICE.md`](NOTICE.md) and the [third-party license register](docs/engineering/THIRD_PARTY_LICENSE_REGISTER.md).
+POWER_FAULT_ANALYZER is distributed as a native Windows desktop engineering application. The website in `website/` is the public download and release front door; it does not replace the native editor. The configured Windows release workflow builds a portable PyInstaller ZIP bundle and its SBOM, dependency-license inventory, third-party notices, build metadata and SHA-256 checksums; it does not produce an MSI/NSIS installer. The project source license is GPL-3.0-or-later, while third-party components retain their own terms. A successful clean-run GitHub Actions build and downloadable Windows artifact have not yet been accepted, so the public download page remains inactive until a GitHub Release contains `PFA-Windows-x64.zip`. See [Desktop distribution and releases](docs/product/DISTRIBUTION_AND_RELEASES.md) for the release contract and gates.
 
 
 ## Desktop iconography and engineering asset libraries
@@ -197,16 +206,8 @@ The desktop profile includes QtAwesome for a consistent icon system, PyQtGraph f
 
 The current engineering preview also includes a transactional property inspector, canvas-scoped keyboard shortcuts and the shared PFA transformer symbol catalogue. See:
 
-- [`PFA-KEYBOARD-002`](docs/architecture/PFA-KEYBOARD-002-QT-SHORTCUT-OWNERSHIP.md)
+- [`PFA-KEYBOARD-001`](docs/architecture/PFA-KEYBOARD-001-WORKBENCH-SHORTCUTS.md)
 - [`PFA-SYMBOLS-001`](docs/engineering/PFA-SYMBOLS-001-transformer-two-winding.md)
 - [Product readiness, scope and known limitations](docs/product/PFA_PRODUCT_READINESS_2026-11-25.md)
 
 On Windows, run `RUN_PFA_WINDOWS.ps1` from the repository root after installing the `dev`, `desktop` and `reports` extras into `.venv`.
-
-
-## Public publication
-
-- Project license: [GPL-3.0-or-later](LICENSE).
-- Website: https://valentinoalvarado.github.io/POWER_FAULT_ANALYZER/
-- Repository: https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER
-- Publication setup: [docs/product/PUBLICATION_GUIDE.md](docs/product/PUBLICATION_GUIDE.md).

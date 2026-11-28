@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
+from power_fault_analyzer.application.commands import NetworkWorkspaceCommands
 from power_fault_analyzer.application.use_cases.network_workspace import (
     DiagramLabelPlacement,
     NetworkWorkspace,
 )
-from power_fault_analyzer.application.commands import NetworkWorkspaceCommands
 from power_fault_analyzer.domain.aggregates.network import Network
 from power_fault_analyzer.domain.entities.bus import Bus
 from power_fault_analyzer.domain.entities.terminal import Terminal
@@ -24,11 +24,15 @@ from power_fault_analyzer.domain.services.network_validation_service import (
     DefaultNetworkValidationService,
 )
 from power_fault_analyzer.domain.value_objects.diagnostic import DiagnosticSeverity
+from power_fault_analyzer.equipment.interfaces.unresolved_branch import (
+    UnresolvedTwoTerminalEquipment,
+)
+from power_fault_analyzer.equipment.interfaces.unresolved_equipment import EngineeringParameter
+from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import (
+    UnresolvedSingleTerminalEquipment,
+)
 from power_fault_analyzer.equipment.sources.equivalent_source import EquivalentSource
 from power_fault_analyzer.equipment.switching.switching_device import SwitchingDevice
-from power_fault_analyzer.equipment.interfaces.unresolved_equipment import EngineeringParameter
-from power_fault_analyzer.equipment.interfaces.unresolved_branch import UnresolvedTwoTerminalEquipment
-from power_fault_analyzer.equipment.interfaces.unresolved_single_terminal import UnresolvedSingleTerminalEquipment
 
 
 class ScriptProject:
@@ -183,7 +187,7 @@ class ScriptProject:
         x: float,
         y: float,
         anchor: str = "middle",
-        font_family: str = "STIX Two Text",
+        font_family: str = "Segoe UI",
         size_pt: float = 7.5,
         weight: str = "normal",
         color: str = "#172033",
@@ -234,7 +238,7 @@ class ScriptProject:
         y: float,
         *,
         anchor: str = "start",
-        font_family: str = "STIX Two Text",
+        font_family: str = "Segoe UI",
         size_pt: float = 7.5,
         weight: str = "normal",
         color: str = "#172033",

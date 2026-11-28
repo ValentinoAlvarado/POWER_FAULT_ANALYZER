@@ -15,7 +15,6 @@ from power_fault_analyzer.application.commands import (
     AddBus,
     MoveDiagramElements,
     NetworkWorkspaceCommands,
-    SetDiagramGrid,
 )
 from power_fault_analyzer.application.use_cases.network_workspace import (
     DiagramLabelPlacement,

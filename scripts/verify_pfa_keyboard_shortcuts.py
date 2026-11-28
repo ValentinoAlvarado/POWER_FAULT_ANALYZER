@@ -13,8 +13,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 from power_fault_analyzer.bootstrap.workbench_container import build_workbench_services
 from power_fault_analyzer.interfaces.desktop.workbench.workbench_window import WorkbenchWindow

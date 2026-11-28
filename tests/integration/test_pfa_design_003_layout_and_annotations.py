@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from itertools import pairwise
+from math import hypot
 from pathlib import Path
 
 from examples.canonical_model_scenarios import (
@@ -22,7 +24,6 @@ from power_fault_analyzer.infrastructure.persistence.json_network_document_repos
 from power_fault_analyzer.scripting.project import ScriptProject
 
 
-
 def test_perpendicular_bay_route_collapses_aligned_default_connection_to_one_segment():
     start = Point(360.0, 220.0)
     end = Point(360.0, 350.0)
@@ -37,11 +38,11 @@ def test_perpendicular_bay_route_uses_minimum_manhattan_dogleg_after_bar_drag():
     route = perpendicular_bay_route(start, end, 0.0)
     assert len(route) == 4
     assert all(abs(first.x - second.x) < 1e-7 or abs(first.y - second.y) < 1e-7
-               for first, second in zip(route, route[1:]))
+               for first, second in pairwise(route))
     assert abs(route[0].x - route[1].x) < 1e-7
     assert abs(route[-2].x - route[-1].x) < 1e-7
     route_length = sum(abs(second.x - first.x) + abs(second.y - first.y)
-                       for first, second in zip(route, route[1:]))
+                       for first, second in pairwise(route))
     lower_bound = abs(end.x - start.x) + abs(end.y - start.y)
     assert abs(route_length - lower_bound) < 1e-7
     assert len(set(route)) == len(route)
@@ -77,11 +78,14 @@ def test_path_topology_uses_distinct_bus_rows_and_perpendicular_vertical_bays():
         ys = sorted(round(item.center.y, 3) for item in document.buses)
         assert len(ys) == len(document.buses)
         assert all(abs(item.orientation_deg % 180.0) < 1e-6 for item in document.buses)
-        assert all(abs((second - first) - 180.0) < 1e-6
-                   for first, second in zip(ys, ys[1:]))
-        assert len({round(item.center.x, 3) for item in document.buses}) == 2
+        # Automatic bus levels are spacious enough to separate the full bay
+        # envelope; row placement remains deterministic and grid aligned.
+        assert all((second - first) >= 360.0
+                   for first, second in pairwise(ys))
+        assert all(abs((value / 20.0) - round(value / 20.0)) < 1e-6 for value in ys)
+        assert all(abs((item.center.x / 20.0) - round(item.center.x / 20.0)) < 1e-6
+                   for item in document.buses)
 
-        equipment_by_id = {item.id: item for item in workspace.network.equipment}
         bus_by_id = {item.bus_id: item for item in document.buses}
         symbols_by_id = {item.equipment_id: item for item in document.symbols}
         for equipment in workspace.network.equipment:
@@ -115,8 +119,8 @@ def test_explicit_double_bus_feeder_bars_are_horizontal_with_centered_labels():
         assert abs(buses[name].orientation_deg % 180.0) < 1e-6
     for name in ("BUS-A", "BUS-B", "FEEDER-A", "FEEDER-B"):
         label = labels[(buses[name].bus_id, name)]
-        assert label.anchor == "start"
-        assert label.position.x > buses[name].bounds.right
+        assert label.anchor == "middle"
+        assert abs(label.position.x - buses[name].center.x) <= 24.0 + 1e-6
 
 
 
@@ -209,17 +213,20 @@ def test_symbol_catalog_has_stable_provenance_and_does_not_claim_iec_conformity(
     assert len(symbol_ids) == len(set(symbol_ids))
     assert len(hashes) == len(set(hashes))
     assert all(len(value) == 64 for value in hashes)
-    assert all(item.normative_status == "NOT_VERIFIED" for item in SYMBOL_DEFINITIONS)
+    assert all(
+        item.normative_status == ("NOT_APPLICABLE" if item.family == "connection_node" else "NOT_VERIFIED")
+        for item in SYMBOL_DEFINITIONS
+    )
     assert all(
         "cross-reference pending" in item.standard_reference
-        for item in SYMBOL_DEFINITIONS if item.family != "transformer"
+        for item in SYMBOL_DEFINITIONS if item.family not in {"transformer", "connection_node"}
     )
     transformer = next(item for item in SYMBOL_DEFINITIONS if item.family == "transformer")
     assert "IEC 60617 S00841 Form 1" in transformer.standard_reference
     assert "dimensional conformance NOT_VERIFIED" in transformer.standard_reference
 
 
-def test_independent_diagram_labels_round_trip_in_schema_15_without_touching_network(tmp_path: Path):
+def test_independent_diagram_labels_round_trip_in_schema_16_without_touching_network(tmp_path: Path):
     workspace = build_single_bus_substation()
     canonical_connection_count = len(workspace.network.connections)
     bus = workspace.network.buses[0]
@@ -233,7 +240,7 @@ def test_independent_diagram_labels_round_trip_in_schema_15_without_touching_net
     repository = JSONNetworkDocumentRepository()
     path = repository.save(workspace, tmp_path / "design-003.network.json")
     payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "1.5"
+    assert payload["schema_version"] == "1.6"
     loaded = repository.load(path)
     restored = loaded.diagram_labels[label.label_id]
     assert restored == label
@@ -326,8 +333,8 @@ def test_busbar_lengths_follow_canonical_terminal_incidence_not_neighbour_degree
             terminal_counts[connection.bus_id] += 1
         for bus in document.buses:
             expected = _busbar_length(terminal_counts[bus.bus_id])
-            assert bus.length == expected
-            assert 160.0 <= bus.length <= 280.0
+            assert bus.length >= expected
+            assert bus.length >= 220.0
 
 
 def test_symbol_catalogue_marks_breaker_and_disconnector_as_distinct_candidates():
@@ -449,7 +456,98 @@ def test_shortest_orthogonal_route_respects_perpendicular_departure_and_arrival(
     assert offset[-1].x == offset[-2].x  # axial arrival at vertical bay pin
     actual = sum(
         abs(second.x - first.x) + abs(second.y - first.y)
-        for first, second in zip(offset, offset[1:])
+        for first, second in pairwise(offset)
     )
     direct_lower_bound = abs(offset[-1].x - offset[0].x) + abs(offset[-1].y - offset[0].y)
     assert actual == direct_lower_bound
+
+
+def test_compact_diagram_density_and_engineering_label_hierarchy():
+    for build in (build_single_bus_substation, build_double_bus_substation,
+                  build_multibus_network):
+        workspace = build()
+        document = project_network_to_diagram(workspace)
+        assert validate_diagram_document(workspace, document) == ()
+
+        labels_by_owner_and_text = {
+            (label.owner_id, label.text): label for label in document.labels
+        }
+        for bus in document.buses:
+            name_label = labels_by_owner_and_text[(bus.bus_id, bus.name)]
+            voltage_label = labels_by_owner_and_text[
+                (bus.bus_id, f"{bus.nominal_voltage_kv:g} kV")
+            ]
+            assert name_label.size_pt == 9.2
+            assert voltage_label.size_pt == 8.2
+
+        labels_by_owner = {
+            label.owner_id: label for label in document.labels
+            if label.owner_id is not None and label.priority == 20
+        }
+        for symbol in document.symbols:
+            label = labels_by_owner[symbol.equipment_id]
+            assert label.size_pt == 9.0
+            # Equipment labels must remain local to the visible symbol envelope.
+            distance = ((label.position.x - symbol.center.x) ** 2
+                        + (label.position.y - symbol.center.y) ** 2) ** 0.5
+            assert distance < 75.0, (symbol.name, distance)
+
+        notes = [label for label in document.labels if label.owner_id is None]
+        assert all(label.size_pt == 7.2 for label in notes)
+
+
+def test_generator_label_uses_nearest_local_clearance_in_dense_bay():
+    workspace = build_multibus_network()
+    document = project_network_to_diagram(workspace)
+    generator = next(item for item in document.symbols if item.name == "GEN-01")
+    label = next(
+        item for item in document.labels
+        if item.owner_id == generator.equipment_id and item.priority == 20
+    )
+
+    # The generator sits beside a transformer and above the next bus row.  Its
+    # name must find a nearby side-clearance position rather than being pushed
+    # an entire text-height (or more) down the bay.
+    assert hypot(
+        label.position.x - generator.center.x,
+        label.position.y - generator.center.y,
+    ) < 75.0
+    assert abs(label.position.x - generator.center.x) <= 24.0
+    assert label.position.y > generator.center.y
+    assert validate_diagram_document(workspace, document) == ()
+
+
+def test_geometry_mutation_keeps_equipment_labels_clear_of_conductors():
+    workspace = build_single_bus_substation()
+    before = (
+        workspace.network.buses,
+        workspace.network.equipment,
+        workspace.network.connections,
+    )
+    workspace.diagram_positions.update({
+        workspace.network.buses[0].id: (999.0, 777.0),
+    })
+
+    document = project_network_to_diagram(workspace)
+
+    after = (
+        workspace.network.buses,
+        workspace.network.equipment,
+        workspace.network.connections,
+    )
+    assert before == after
+    assert document.diagnostics == ()
+    assert validate_diagram_document(workspace, document) == ()
+
+    equipment_labels = {
+        label.owner_id: label
+        for label in document.labels
+        if label.owner_id is not None and label.priority == 20
+    }
+    symbols = {symbol.equipment_id: symbol for symbol in document.symbols}
+    for equipment_id, label in equipment_labels.items():
+        symbol = symbols[equipment_id]
+        assert hypot(
+            label.position.x - symbol.center.x,
+            label.position.y - symbol.center.y,
+        ) < 75.0

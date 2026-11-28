@@ -1,7 +1,25 @@
-# PFA-WORKBENCH-004.2.3.1 — Qt Offscreen Teardown
+# PFA-WORKBENCH-004.2.3.1 — Qt Offscreen Acceptance Teardown
 
-The property editor acceptance harness creates an in-memory Workbench and marks
-it dirty through real commands. Closing it previously invoked the unsaved
-project modal prompt, which cannot be answered under Qt offscreen. The harness
-now clears its synthetic dirty flag before close, processes events and asserts
-that the window actually closes. Production close behavior is unchanged.
+## Defect
+
+The property-editor acceptance script creates an in-memory `WorkbenchWindow`,
+then edits the synthetic workspace through the real inspector and QUndoStack.
+Those edits mark the window dirty. Calling `window.close()` then enters the
+production `closeEvent`, which correctly asks the user to Save/Discard/Cancel.
+In the offscreen Qt platform there is no interactive user to answer the modal
+`QMessageBox`, so the test process appears to hang after the last property-editor
+assertion. The Qt message `This plugin does not support propagateSizeHints()`
+was emitted by that modal dialog; it was not the root error.
+
+## Correction
+
+Immediately before teardown, the acceptance harness marks its synthetic
+in-memory workspace clean (`window._dirty = False`), calls `window.close()`,
+processes Qt events, and asserts that the top-level window is no longer visible.
+This preserves the production unsaved-project prompt for actual users and avoids
+weakening the property-editor assertions.
+
+## Scope
+
+Test-harness teardown only. No electrical model, diagram geometry, inspector
+transaction, command bus, or production close-event behavior is changed.

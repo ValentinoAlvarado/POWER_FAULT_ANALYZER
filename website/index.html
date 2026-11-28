@@ -4,38 +4,28 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101b2b">
-  <meta name="description" content="POWER_FAULT_ANALYZER is an open-source Windows workbench for power-system network modelling, one-line diagrams and short-circuit studies.">
   <title>POWER_FAULT_ANALYZER — Power-system engineering</title>
+  <meta name="description" content="A desktop engineering workbench for power-system modelling, one-line diagrams and short-circuit studies.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="topbar"><a class="brand" href="#top"><span class="mark">PFA</span><span>POWER_FAULT_ANALYZER</span></a><nav><a href="#platform">Platform</a><a href="#screens">Diagrams</a><a href="#engineering">Scope</a><a id="source-nav" href="https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER">Source</a></nav></header>
+  <header class="topbar"><a class="brand" href="#top"><span class="mark">PFA</span><span>POWER_FAULT_ANALYZER</span></a><nav><a href="#features">Platform</a><a href="#engineering">Engineering</a><a id="source-nav" href="#source">Source code</a></nav></header>
   <main id="top">
     <section class="hero">
-      <div class="eyebrow">OPEN-SOURCE POWER-SYSTEM ENGINEERING</div>
+      <div class="eyebrow">POWER-SYSTEM ENGINEERING PLATFORM</div>
       <h1>Model the grid.<br><em>Understand the fault.</em></h1>
-      <p class="lead">A native Windows engineering workbench for building electrical network models, preparing single-line diagrams and running supported short-circuit and protection studies.</p>
-      <div class="actions"><a class="button primary" id="download-installer" href="#release" aria-disabled="true">Preparing Windows release…</a><a class="button secondary" id="download-portable" href="#release" aria-disabled="true">Portable ZIP</a></div>
-      <div class="release-meta" id="release-meta">Windows 10/11 · x64 · GPL-3.0-or-later · SHA-256 and dependency inventory included</div>
-      <div class="release-note" id="release-note" role="status">No verified Windows release has been published yet. Downloads activate only when GitHub Releases contains the installer and checksum assets.</div>
-      <div class="release-links"><a id="checksums-link" href="#release" aria-disabled="true">SHA-256 checksums</a><a id="sbom-link" href="#release" aria-disabled="true">Software bill of materials</a><a href="https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/releases">All releases</a></div>
+      <p class="lead">A desktop engineering workbench for building power-system networks, preparing single-line diagrams and running traceable electrical studies.</p>
+      <div class="actions"><a class="button primary" id="download" href="#release" aria-disabled="true">Checking latest Windows release…</a><a class="button secondary" id="source" href="#source">View source</a></div>
+      <div class="release-meta" id="release-meta">Windows x64 · Standalone desktop application · SHA-256 published with each release</div>
+      <div class="release-note" id="release-note" role="status">The public release endpoint will appear here once the repository is configured and a verified release is published.</div>
     </section>
-    <section class="features" id="platform">
-      <article><span>01 / MODEL</span><h2>Physical network first</h2><p>Buses, equipment, terminals and connectivity remain authoritative engineering data, separate from drawing geometry.</p></article>
-      <article><span>02 / DIAGRAM</span><h2>Engineering workbench</h2><p>Single-line editing, perpendicular bays, terminal-aware routing, editable labels, undo/redo and vector export.</p></article>
-      <article><span>03 / ANALYZE</span><h2>Traceable studies</h2><p>Supported short-circuit and protection calculations with explicit input requirements, validation and documented limits.</p></article>
+    <section class="features" id="features">
+      <article><span>01 / MODEL</span><h2>Physical network first</h2><p>Buses, equipment, terminals and topology remain authoritative engineering data, separate from drawing geometry.</p></article>
+      <article><span>02 / DIAGRAM</span><h2>One-line design</h2><p>Source-based symbols, movable placements, rotation, document layout and vector export.</p></article>
+      <article><span>03 / ANALYZE</span><h2>Reproducible studies</h2><p>Short-circuit analysis, saved project state, engineering results and traceable reports.</p></article>
     </section>
-    <section class="screens" id="screens">
-      <div class="section-heading"><div class="eyebrow">WORKBENCH PREVIEW</div><h2>Electrical models, not just drawings.</h2></div>
-      <div class="screen-grid">
-        <figure><img src="assets/diagrams/01_single_bus.png" alt="Single-bus power-system reference model"><figcaption>Single-bus reference network</figcaption></figure>
-        <figure><img src="assets/diagrams/02_double_bus.png" alt="Double-bus power-system reference model"><figcaption>Double-bus arrangement</figcaption></figure>
-        <figure><img src="assets/diagrams/03_multibus.png" alt="Multi-bus power-system reference model"><figcaption>Multi-bus network</figcaption></figure>
-      </div>
-    </section>
-    <section class="engineering" id="engineering"><div><div class="eyebrow">ENGINEERING SCOPE</div><h2>Explicit capabilities.<br>Explicit limits.</h2></div><div><p>PFA provides a desktop editor, canonical electrical network model, terminal-aware single-line layout, supported symmetrical-component short-circuit studies and selected protection calculations. It does not currently claim full IEC 60909 coverage, AC/DC load flow, OPF, N-1 contingency analysis or complete end-to-end modelling for every equipment category.</p><p>Symbol descriptors and third-party assets carry provenance. IEC 60617 conformance is not claimed where symbol-by-symbol verification has not been completed.</p></div></section>
-    <section class="license-strip"><div><div class="eyebrow">LICENSE</div><h2>GPL-3.0-or-later</h2><p>Source code is public under the GNU General Public License. QElectroTech elements, Qt and other third-party packages retain their independent licenses and notices.</p></div><a class="button secondary" href="https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/blob/main/LICENSE">Read license</a></section>
-    <footer><span>POWER_FAULT_ANALYZER</span><span>Windows desktop engineering software · GPL-3.0-or-later</span><a id="source-footer" href="https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER">Repository</a></footer>
+    <section class="engineering" id="engineering"><div><div class="eyebrow">BUILT FOR ENGINEERS</div><h2>Not a diagramming toy.</h2></div><p>PFA is being developed as a community-oriented engineering platform. Tagged releases are gated by automated tests, pinned source-asset verification and dependency-license review. Project and third-party notices travel with each portable distribution. Symbols without an explicit model mapping are identified as drawing-only; they are never silently treated as electrical equipment.</p></section>
+    <footer><span>POWER_FAULT_ANALYZER</span><span>Engineering software · Verified release assets</span><a id="source-footer" href="#source">Repository</a></footer>
   </main>
   <script src="release.js"></script>
 </body>

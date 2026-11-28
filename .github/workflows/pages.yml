@@ -1,9 +1,9 @@
-name: Deploy PFA download website
+name: Deploy product download page
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, product-reboot]
     paths:
       - "website/**"
       - ".github/workflows/pages.yml"

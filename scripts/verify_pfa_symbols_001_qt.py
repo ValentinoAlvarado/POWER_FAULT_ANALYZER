@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from uuid import uuid4
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -16,7 +15,7 @@ from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import (
 
 
 def _has_dark_pixel(image: QImage, x: float, y: float, radius: int = 4) -> bool:
-    cx, cy = int(round(x)), int(round(y))
+    cx, cy = round(x), round(y)
     for py in range(max(0, cy - radius), min(image.height(), cy + radius + 1)):
         for px in range(max(0, cx - radius), min(image.width(), cx + radius + 1)):
             color = image.pixelColor(px, py)

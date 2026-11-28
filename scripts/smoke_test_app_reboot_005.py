@@ -74,6 +74,10 @@ def main() -> int:
     assert window.symbol_browser._preview_item is not None
     assert window.symbol_browser._preview_item.rotation() == 90.0
     window.symbol_browser._request_insert()
+    assert window.show_source_candidates_action.isChecked(), (
+        "Explicit source-symbol insertion must reveal the drawing-only candidate layer."
+    )
+    assert window.canvas._source_candidates_visible
     selected = window.canvas.selected_diagram_symbol()
     assert selected is not None, "Newly inserted drawing symbol must be selected."
     instance_id, initial_rotation = selected
@@ -83,9 +87,9 @@ def main() -> int:
     assert not window.canvas._empty_state.isVisible(), (
         "A placed drawing reference must dismiss the empty-canvas guide."
     )
-    window.canvas.set_source_candidate_visibility(False)
+    window.show_source_candidates_action.setChecked(False)
     assert not window.canvas.source_candidate_items()[0].isVisible()
-    window.canvas.set_source_candidate_visibility(True)
+    window.show_source_candidates_action.setChecked(True)
     assert window.canvas.source_candidate_items()[0].isVisible()
     restored_selection = window.canvas.selected_diagram_symbol()
     assert restored_selection is not None and restored_selection[0] == instance_id, (

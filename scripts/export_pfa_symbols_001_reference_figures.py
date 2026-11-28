@@ -14,17 +14,17 @@ for import_root in (ROOT, ROOT / "src"):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
-from examples.canonical_model_scenarios import (  # noqa: E402
+from examples.canonical_model_scenarios import (  # noqa: I001
     build_double_bus_substation,
     build_multibus_network,
     build_single_bus_substation,
 )
-from power_fault_analyzer.diagram.model_document_export import (  # noqa: E402
+from power_fault_analyzer.diagram.model_document_export import (
     export_engineering_pdf,
     export_engineering_png,
     export_engineering_svg,
 )
-from power_fault_analyzer.diagram.model_projection import (  # noqa: E402
+from power_fault_analyzer.diagram.model_projection import (
     project_network_to_diagram,
     validate_diagram_document,
 )

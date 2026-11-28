@@ -7,7 +7,7 @@ modify electrical connectivity.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 from typing import Protocol, runtime_checkable
 from uuid import UUID
@@ -28,12 +28,18 @@ from power_fault_analyzer.application.use_cases.network_workspace import (
     DiagramSymbolPlacement,
     NetworkWorkspace,
 )
+from power_fault_analyzer.domain.aggregates.network import Network
+from power_fault_analyzer.domain.entities.bus import Bus
 from power_fault_analyzer.domain.enums.bus_kind import BusKind
 from power_fault_analyzer.domain.enums.switching_device import SwitchPosition
-from power_fault_analyzer.domain.entities.bus import Bus
-from power_fault_analyzer.domain.aggregates.network import Network
 from power_fault_analyzer.domain.interfaces.network_contracts import ElectricalEquipment
 from power_fault_analyzer.domain.value_objects.voltage import Voltage
+from power_fault_analyzer.operations.models import (
+    OperatingScenario,
+)
+from power_fault_analyzer.operations.models import (
+    SwitchPosition as OperatingSwitchPosition,
+)
 
 
 @runtime_checkable
@@ -201,6 +207,77 @@ class RemoveDiagramLabel:
 
 
 @dataclass(frozen=True, slots=True)
+class UpsertOperatingScenario:
+    """Store an immutable operating overlay separately from the physical Network."""
+
+    scenario: OperatingScenario
+    name: str = "Save operating scenario"
+
+    def execute(self, workspace: NetworkWorkspace) -> OperatingScenario | None:
+        if not isinstance(self.scenario, OperatingScenario):
+            raise TypeError("scenario must be an OperatingScenario.")
+        previous = workspace.operating_scenarios.get(self.scenario.scenario_id)
+        workspace.operating_scenarios[self.scenario.scenario_id] = self.scenario
+        return previous
+
+
+@dataclass(frozen=True, slots=True)
+class RemoveOperatingScenario:
+    scenario_id: UUID
+    name: str = "Remove operating scenario"
+
+    def execute(self, workspace: NetworkWorkspace) -> OperatingScenario:
+        if not isinstance(self.scenario_id, UUID):
+            raise TypeError("scenario_id must be a UUID.")
+        try:
+            removed = workspace.operating_scenarios.pop(self.scenario_id)
+        except KeyError as exc:
+            raise KeyError(f"Unknown operating scenario '{self.scenario_id}'.") from exc
+        if workspace.active_operating_scenario_id == self.scenario_id:
+            workspace.active_operating_scenario_id = None
+        return removed
+
+
+@dataclass(frozen=True, slots=True)
+class SetActiveOperatingScenario:
+    scenario_id: UUID | None
+    name: str = "Select operating scenario"
+
+    def execute(self, workspace: NetworkWorkspace) -> UUID | None:
+        if self.scenario_id is not None and not isinstance(self.scenario_id, UUID):
+            raise TypeError("scenario_id must be a UUID or None.")
+        if self.scenario_id is not None and self.scenario_id not in workspace.operating_scenarios:
+            raise KeyError(f"Unknown operating scenario '{self.scenario_id}'.")
+        previous = workspace.active_operating_scenario_id
+        workspace.active_operating_scenario_id = self.scenario_id
+        return previous
+
+
+@dataclass(frozen=True, slots=True)
+class SetOperatingScenarioSwitchPosition:
+    scenario_id: UUID
+    equipment_id: UUID
+    position: OperatingSwitchPosition
+    name: str = "Change simulated switch position"
+
+    def execute(self, workspace: NetworkWorkspace) -> OperatingScenario:
+        if not isinstance(self.position, OperatingSwitchPosition):
+            raise TypeError("position must be an operations SwitchPosition value.")
+        try:
+            scenario = workspace.operating_scenarios[self.scenario_id]
+        except KeyError as exc:
+            raise KeyError(f"Unknown operating scenario '{self.scenario_id}'.") from exc
+        equipment = workspace.network.get_equipment(self.equipment_id)
+        if not (hasattr(equipment, "device_kind") and hasattr(equipment, "position")):
+            raise TypeError("Selected equipment is not a switching device.")
+        positions = dict(scenario.switch_positions)
+        positions[self.equipment_id] = self.position
+        updated = replace(scenario, switch_positions=positions)
+        workspace.operating_scenarios[self.scenario_id] = updated
+        return updated
+
+
+@dataclass(frozen=True, slots=True)
 class SetEquipmentSwitchPosition:
     equipment_id: UUID
     position: SwitchPosition
@@ -346,6 +423,19 @@ class RemoveEquipment:
 
     def execute(self, workspace: NetworkWorkspace) -> None:
         RemoveEquipmentFromNetwork().execute(workspace.network, self.equipment_id)
+        for scenario_id, scenario in tuple(workspace.operating_scenarios.items()):
+            switches = dict(scenario.switch_positions)
+            availability = dict(scenario.equipment_in_service)
+            sources = dict(scenario.source_enabled)
+            switches.pop(self.equipment_id, None)
+            availability.pop(self.equipment_id, None)
+            sources.pop(self.equipment_id, None)
+            workspace.operating_scenarios[scenario_id] = replace(
+                scenario,
+                switch_positions=switches,
+                equipment_in_service=availability,
+                source_enabled=sources,
+            )
         workspace.diagram_positions.pop(self.equipment_id, None)
         for instance_id, placement in tuple(workspace.diagram_symbols.items()):
             if placement.equipment_id == self.equipment_id:

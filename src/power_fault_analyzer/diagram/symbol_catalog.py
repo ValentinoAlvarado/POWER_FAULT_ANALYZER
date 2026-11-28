@@ -62,6 +62,7 @@ class EngineeringSymbolDefinition:
     standard_edition: str = "IEC 60617 cross-reference not established"
     source_uri: str = "internal://power-fault-analyzer/symbol-catalog"
     primitives: tuple[SymbolPrimitive, ...] = ()
+    text_glyph: str = ""
 
     @property
     def definition_hash(self) -> str:
@@ -75,6 +76,7 @@ class EngineeringSymbolDefinition:
                 f"{primitive.terminal_index}"
                 for primitive in self.primitives
             ),
+            self.text_glyph,
         ))
         return sha256(payload.encode("utf-8")).hexdigest()
 
@@ -83,6 +85,58 @@ _DEFINITIONS = (
     EngineeringSymbolDefinition(
         "PFA-SLD-BUSBAR-001", "busbar", 204.0, 6.0, (),
         "Straight busbar with finite extent; tap points reference canonical terminal links.",
+    ),
+    EngineeringSymbolDefinition(
+        "PFA-SLD-CONNECTION-NODE-001", "connection_node", 12.0, 12.0, (),
+        "Explicit electrical connection node, rendered as a filled junction point.",
+        normative_status="NOT_APPLICABLE",
+    ),
+    EngineeringSymbolDefinition(
+        "PFA-SLD-LOAD-001", "load", 52.0, 52.0,
+        (SymbolTerminal("LOAD", 0.0, -26.0),),
+        "Distinct static load marker with a circular demand symbol and P/Q glyph.",
+        standard_reference="PFA original symbol — IEC 60617 cross-reference pending",
+        primitives=(SymbolPrimitive("circle", (0.0, 0.0, 19.0)),),
+        text_glyph="P/Q",
+    ),
+    EngineeringSymbolDefinition(
+        "PFA-SLD-CAPACITOR-001", "capacitor", 48.0, 56.0,
+        (SymbolTerminal("LINE", 0.0, -28.0),),
+        "Shunt capacitor with separated plate lines and an explicit unresolved state marker when data are missing.",
+        standard_reference="PFA original symbol — IEC 60617 cross-reference pending",
+        primitives=(
+            SymbolPrimitive("line", (0.0, -28.0, 0.0, -4.0)),
+            SymbolPrimitive("line", (-17.0, -3.0, 17.0, -3.0)),
+            SymbolPrimitive("line", (-17.0, 5.0, 17.0, 5.0)),
+        ),
+        text_glyph="C",
+    ),
+    EngineeringSymbolDefinition(
+        "PFA-SLD-REACTOR-001", "reactor", 52.0, 64.0,
+        (SymbolTerminal("LINE", 0.0, -32.0),),
+        "Shunt reactor represented by a vertical inductive coil and terminal stem.",
+        standard_reference="PFA original symbol — IEC 60617 cross-reference pending",
+        primitives=(
+            SymbolPrimitive("line", (0.0, -32.0, 0.0, -22.0)),
+            SymbolPrimitive("circle", (0.0, -15.0, 7.0)),
+            SymbolPrimitive("circle", (0.0, 0.0, 7.0)),
+            SymbolPrimitive("circle", (0.0, 15.0, 7.0)),
+            SymbolPrimitive("line", (0.0, 22.0, 0.0, 30.0)),
+        ),
+        text_glyph="L",
+    ),
+    EngineeringSymbolDefinition(
+        "PFA-SLD-COMPENSATION-001", "compensation", 52.0, 52.0,
+        (SymbolTerminal("LINE", 0.0, -26.0),),
+        "Generic reactive compensation unit shown as a diamond and Q glyph; subtype remains explicit in metadata.",
+        standard_reference="PFA original symbol — IEC 60617 cross-reference pending",
+        primitives=(
+            SymbolPrimitive("line", (0.0, -22.0, 22.0, 0.0)),
+            SymbolPrimitive("line", (22.0, 0.0, 0.0, 22.0)),
+            SymbolPrimitive("line", (0.0, 22.0, -22.0, 0.0)),
+            SymbolPrimitive("line", (-22.0, 0.0, 0.0, -22.0)),
+        ),
+        text_glyph="Q",
     ),
     EngineeringSymbolDefinition(
         "PFA-SLD-SOURCE-001", "source", 44.0, 44.0,

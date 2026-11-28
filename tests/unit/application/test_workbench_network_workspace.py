@@ -140,7 +140,7 @@ def test_network_document_round_trip_preserves_drawing_symbol_instances(tmp_path
 
     path = JSONNetworkDocumentRepository().save(workspace, tmp_path / "diagram-symbol.pfan")
     payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "1.5"
+    assert payload["schema_version"] == "1.6"
     loaded = JSONNetworkDocumentRepository().load(path)
 
     assert loaded.diagram_symbols == {placement.instance_id: placement}

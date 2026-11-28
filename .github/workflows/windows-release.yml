@@ -3,6 +3,10 @@ name: Windows desktop release
 on:
   workflow_dispatch:
   push:
+    branches:
+      - "main"
+      - "fix/portable-code-automation-worker"
+      - "fix/diagram-auto-layout-r19"
     tags:
       - "v*"
 
@@ -16,20 +20,43 @@ jobs:
     env:
       PFA_RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13 x64
+        uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           architecture: x64
           cache: pip
+
+      - name: Acquire pinned QElectroTech symbol assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # This is a PowerShell script, not a native executable. Its terminating
+          # errors propagate directly; LASTEXITCODE is undefined/null here.
+          ./scripts/Acquire-QElectroTechSymbolSeed.ps1
+
       - name: Install NSIS compiler
         shell: pwsh
         run: |
-          choco install nsis --yes --no-progress
-          if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { throw "NSIS compiler was not installed." }
-      - name: Acquire pinned QElectroTech symbol assets
-        shell: pwsh
-        run: ./scripts/Acquire-QElectroTechSymbolSeed.ps1
+          $ErrorActionPreference = 'Stop'
+          $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
+          $makensisPath = Join-Path $programFilesX86 'NSIS\makensis.exe'
+          if (-not (Test-Path -LiteralPath $makensisPath -PathType Leaf)) {
+            $makensisPath = Join-Path $env:ProgramFiles 'NSIS\makensis.exe'
+          }
+          if (-not (Test-Path -LiteralPath $makensisPath -PathType Leaf)) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "Chocolatey NSIS installation failed with exit code $LASTEXITCODE." }
+            $makensisPath = Join-Path $programFilesX86 'NSIS\makensis.exe'
+          }
+          if (-not (Test-Path -LiteralPath $makensisPath -PathType Leaf)) {
+            throw "NSIS installation completed but makensis.exe was not found at: $makensisPath"
+          }
+          "PFA_MAKENSIS_PATH=$makensisPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Install Cairo native runtime
         uses: msys2/setup-msys2@v2
         id: cairo
@@ -43,26 +70,60 @@ jobs:
         env:
           MSYS2_LOCATION: ${{ steps.cairo.outputs.msys2-location }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:MSYS2_LOCATION)) { throw "MSYS2 location was not provided." }
           $cairoBin = Join-Path $env:MSYS2_LOCATION "ucrt64\bin"
           $cairoDll = Join-Path $cairoBin "libcairo-2.dll"
+          if (-not (Test-Path -LiteralPath $cairoDll)) { throw "Cairo DLL missing: $cairoDll" }
+          "CAIROCFFI_DLL_DIRECTORIES=$cairoBin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $cairoBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
-          if (-not (Test-Path -LiteralPath $cairoDll)) {
-              throw "Cairo runtime not found: $cairoDll"
+      - name: Build, test and package portable Windows application
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The build script checks every native tool it invokes and throws on
+          # failure. Do not inspect LASTEXITCODE after invoking a .ps1 script.
+          ./scripts/build_windows_release.ps1
+
+      - name: Require reviewed licenses for packages without metadata
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          python scripts/verify_release_license_review.py `
+            --inventory dist/release/PYTHON-DEPENDENCY-LICENSES.md `
+            --review RELEASE_LICENSE_REVIEW.csv
+          if ($LASTEXITCODE -ne 0) { throw "Third-party license review failed; release blocked." }
+
+      - name: Verify release artifacts
+        shell: pwsh
+        run: |
+          $required = @(
+            "dist/release/PFA-Setup-x64.exe",
+            "dist/release/PFA-Windows-x64.zip",
+            "dist/release/SHA256SUMS.txt",
+            "dist/release/SBOM.cdx.json",
+            "dist/release/PYTHON-DEPENDENCY-LICENSES.md",
+            "dist/release/THIRD_PARTY_NOTICES.md",
+            "dist/release/BUILD-INFO.json",
+            "dist/release/Update-PFA-Portable.ps1"
+          )
+          foreach ($file in $required) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Required release artifact missing: $file" }
+            if ((Get-Item -LiteralPath $file).Length -le 0) { throw "Release artifact is empty: $file" }
+          }
+          foreach ($line in Get-Content "dist/release/SHA256SUMS.txt") {
+            if ($line -notmatch '^([a-fA-F0-9]{64})\s+(.+)$') { throw "Invalid checksum row: $line" }
+            $expected = $Matches[1].ToLowerInvariant()
+            $target = Join-Path "dist/release" $Matches[2].Trim()
+            if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "Checksum target missing: $target" }
+            $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "SHA-256 mismatch: $target" }
           }
 
-          "CAIROCFFI_DLL_DIRECTORIES=$cairoBin" |
-              Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-          $cairoBin |
-              Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-
-          Write-Host "Cairo runtime configured: $cairoBin"
-      - name: Build, test and package Windows application
-        shell: pwsh
-        run: ./scripts/build_windows_release.ps1
-      - uses: actions/upload-artifact@v4
+      - name: Upload portable release artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: POWER-FAULT-ANALYZER-Windows-${{ github.ref_name }}
+          name: POWER-FAULT-ANALYZER-Windows-${{ github.sha }}
           if-no-files-found: error
           path: |
             dist/release/PFA-Setup-x64.exe
@@ -72,22 +133,49 @@ jobs:
             dist/release/PYTHON-DEPENDENCY-LICENSES.md
             dist/release/THIRD_PARTY_NOTICES.md
             dist/release/BUILD-INFO.json
-      - name: Require reviewed licenses for packages without metadata
-        if: startsWith(github.ref, 'refs/tags/')
+            dist/release/Update-PFA-Portable.ps1
+      - name: Render SVG and Qt diagram acceptance gallery
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $python = '.venv\Scripts\python.exe'
+          if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw "Release Python not found: $python" }
+          & $python scripts\render_diagram_acceptance_gallery.py --output-dir artifacts\diagram-review
+          if ($LASTEXITCODE -ne 0) { throw "Diagram acceptance gallery failed with exit code $LASTEXITCODE." }
+
+      - name: Emit Qt and SVG comparisons for visual inspection
         shell: pwsh
         run: |
-          python scripts/verify_release_license_review.py --inventory dist/release/PYTHON-DEPENDENCY-LICENSES.md --review RELEASE_LICENSE_REVIEW.csv
+          $ErrorActionPreference = 'Stop'
+          $python = '.venv\Scripts\python.exe'
+          $ruff = '.venv\Scripts\ruff.exe'
+          & $ruff check scripts\emit_diagram_review_previews.py
+          if ($LASTEXITCODE -ne 0) { throw 'Diagram preview lint failed.' }
+          & $python scripts\emit_diagram_review_previews.py --directory artifacts\diagram-review
+          if ($LASTEXITCODE -ne 0) { throw 'Diagram preview emission failed.' }
+
+      - name: Upload diagram review images and vector sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: PFA-Diagram-Review-${{ github.sha }}
+          if-no-files-found: error
+          path: artifacts/diagram-review/
+
       - name: Publish GitHub Release assets
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: POWER_FAULT_ANALYZER ${{ github.ref_name }}
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(github.ref_name, '-') || contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'rc') }}
           files: |
             dist/release/PFA-Setup-x64.exe
             dist/release/PFA-Windows-x64.zip
             dist/release/SHA256SUMS.txt
+            dist/release/Update-PFA-Portable.ps1
             dist/release/SBOM.cdx.json
             dist/release/PYTHON-DEPENDENCY-LICENSES.md
             dist/release/THIRD_PARTY_NOTICES.md

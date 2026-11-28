@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 import traceback
 from copy import deepcopy
 from dataclasses import fields, replace
 from pathlib import Path
-from uuid import UUID, NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from PySide6.QtCore import (
     QObject,
@@ -15,18 +18,28 @@ from PySide6.QtCore import (
     QRunnable,
     QSettings,
     QSize,
+    QStandardPaths,
     Qt,
     QThreadPool,
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter, QUndoCommand, QUndoStack
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QUndoCommand,
+    QUndoStack,
+)
 from PySide6.QtWidgets import (
+    QApplication,
     QDockWidget,
     QDoubleSpinBox,
     QFileDialog,
-    QFrame,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QInputDialog,
@@ -36,6 +49,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QSplitter,
     QSplitterHandle,
@@ -49,28 +63,35 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from power_fault_analyzer.diagram.model_projection import project_network_to_diagram
 from power_fault_analyzer.application.commands import (
     MoveDiagramElements,
     NetworkWorkspaceCommands,
     RemoveBus,
     RemoveDiagramLabel,
     RemoveDiagramPosition,
+    RemoveDiagramRotation,
     RemoveDiagramSymbol,
     RemoveEquipment,
-    RemoveDiagramRotation,
     RotateBusbar,
+    SetActiveOperatingScenario,
+    SetOperatingScenarioSwitchPosition,
     UpdateBus,
     UpsertDiagramLabel,
     UpsertDiagramSymbol,
+    UpsertOperatingScenario,
 )
-from power_fault_analyzer.diagram.model_document_export import export_engineering_svg, export_engineering_pdf
 from power_fault_analyzer.application.use_cases.network_workspace import (
     DiagramLabelPlacement,
     DiagramSymbolPlacement,
     NetworkStudyRecord,
     NetworkWorkspace,
 )
+from power_fault_analyzer.diagram.layout import Point, snap_point
+from power_fault_analyzer.diagram.model_document_export import (
+    export_engineering_pdf,
+    export_engineering_svg,
+)
+from power_fault_analyzer.diagram.model_projection import project_network_to_diagram
 from power_fault_analyzer.domain.aggregates.network import Network
 from power_fault_analyzer.domain.enums.bus_kind import BusKind
 from power_fault_analyzer.domain.enums.equipment_interface import EquipmentInterfaceKind
@@ -94,9 +115,11 @@ from power_fault_analyzer.equipment.transformers.two_winding_transformer import 
 )
 from power_fault_analyzer.equipment.transmission.line import Line
 from power_fault_analyzer.interfaces.desktop.icon_theme import engineering_icon
-from power_fault_analyzer.interfaces.desktop.workbench.design_system import (
-    palette_for_theme,
-    stylesheet_for_theme,
+from power_fault_analyzer.interfaces.desktop.release_updates import (
+    ReleaseUpdate,
+    discover_latest_release,
+    download_update_bundle,
+    load_installation_build_info,
 )
 from power_fault_analyzer.interfaces.desktop.workbench.code_automation_studio import (
     CodeAutomationStudio,
@@ -113,6 +136,8 @@ from power_fault_analyzer.interfaces.desktop.workbench.dialogs import (
 from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import NetworkCanvasView
 from power_fault_analyzer.interfaces.desktop.workbench.qet_symbol_browser import QETSymbolBrowser
 from power_fault_analyzer.interfaces.desktop.workbench.results_workspace import ResultsWorkspace
+from power_fault_analyzer.operations import analyze_workspace, scenario_from_physical_network
+from power_fault_analyzer.operations.models import SwitchPosition as OperatingSwitchPosition
 
 
 class _WorkerSignals(QObject):
@@ -121,7 +146,7 @@ class _WorkerSignals(QObject):
 
 
 class _StudyWorker(QRunnable):
-    """Run the numerical use case away from the GUI thread."""
+    """Run a callable away from the GUI thread."""
 
     def __init__(self, callable_):
         super().__init__()
@@ -133,6 +158,31 @@ class _StudyWorker(QRunnable):
             self.signals.succeeded.emit(self._callable())
         except Exception:  # noqa: BLE001 - isolate failures at the worker/GUI boundary.
             self.signals.failed.emit(traceback.format_exc())
+
+
+class _UpdateDownloadSignals(QObject):
+    completed = Signal(object)
+    failed = Signal(str)
+    progress = Signal(int)
+
+
+class _UpdateDownloadWorker(QRunnable):
+    """Download and verify a published portable update without blocking Qt."""
+
+    def __init__(self, release: ReleaseUpdate) -> None:
+        super().__init__()
+        self.release = release
+        self.signals = _UpdateDownloadSignals()
+
+    def run(self) -> None:
+        try:
+            bundle = download_update_bundle(
+                self.release,
+                progress=self.signals.progress.emit,
+            )
+            self.signals.completed.emit(bundle)
+        except Exception as exc:  # noqa: BLE001 - isolate failures at the worker/GUI boundary.
+            self.signals.failed.emit(str(exc))
 
 
 class _MoveDiagramItemCommand(QUndoCommand):
@@ -186,6 +236,22 @@ class _RestoreWorkspaceSnapshot:
             if descriptor.name == "network":
                 continue
             setattr(workspace, descriptor.name, deepcopy(getattr(snapshot, descriptor.name)))
+
+
+class _OperatingWorkspaceSnapshotCommand(QUndoCommand):
+    """Undoable scenario edit; physical Network is never touched by the edit itself."""
+
+    def __init__(self, window, before: NetworkWorkspace, after: NetworkWorkspace, text: str) -> None:
+        super().__init__(text)
+        self._window = window
+        self._before = deepcopy(before)
+        self._after = deepcopy(after)
+
+    def undo(self) -> None:
+        self._window._apply_operating_workspace_snapshot(self._before, f"Undid {self.text()}.")
+
+    def redo(self) -> None:
+        self._window._apply_operating_workspace_snapshot(self._after, f"Applied {self.text()}.")
 
 
 class _DeleteWorkspaceSelectionCommand(QUndoCommand):
@@ -349,12 +415,20 @@ class WorkbenchWindow(QMainWindow):
         self._session_runs: list[tuple[str, str, str]] = []
         self._thread_pool = QThreadPool.globalInstance()
         self._undo_stack = QUndoStack(self)
-        self._ui_settings = QSettings("POWER_FAULT_ANALYZER", "EngineeringWorkbench")
-        stored_theme = str(self._ui_settings.value("appearance/theme", "dark")).casefold()
-        self._dark_theme = stored_theme != "light"
+        self._dark_theme = False
         self._selected_equipment_id: UUID | None = None
         self._property_editor_target: tuple[str, str] | None = None
         self._property_editor_state: dict | None = None
+        self._ui_settings = QSettings("POWER_FAULT_ANALYZER", "EngineeringWorkbench")
+        self._dark_theme = (
+            self._ui_settings.value("appearance/theme", "light", type=str) == "dark"
+        )
+        self._updates_on_startup = self._ui_settings.value(
+            "updates/check_on_startup", True, type=bool
+        )
+        self._update_check_worker = None
+        self._update_download_worker = None
+        self._update_progress: QProgressDialog | None = None
         self._build_actions()
         self._build_docks()
         self._build_central_workspace()
@@ -370,11 +444,12 @@ class WorkbenchWindow(QMainWindow):
         self.setWindowTitle("POWER_FAULT_ANALYZER — Engineering Workbench")
         self.statusBar().showMessage("Ready · Physical network model · 60 Hz")
         self._log("Workbench initialized. Add equipment or load REF-3PH-001B template.")
+        if self._updates_on_startup and getattr(sys, "frozen", False):
+            QTimer.singleShot(4000, lambda: self._check_for_updates(automatic=True))
 
     # ------------------------------------------------------------------ actions
     def _awesome_icon(self, name: str, fallback: QStyle.StandardPixmap):
-        palette = palette_for_theme("dark" if self._dark_theme else "light")
-        return engineering_icon(self.style(), name, fallback, color=palette.icon)
+        return engineering_icon(self.style(), name, fallback)
 
     def _action(self, text: str, slot, shortcut: str | None = None) -> QAction:
         action = QAction(text, self)
@@ -470,6 +545,31 @@ class WorkbenchWindow(QMainWindow):
         network_menu.addAction(self.grid_action)
         network_menu.addAction(self.snap_action)
 
+        operations_menu = bar.addMenu("&Operations")
+        self.capture_operating_scenario_action = self._action(
+            "Capture Physical State as Scenario…", self._capture_operating_scenario
+        )
+        self.activate_operating_scenario_action = self._action(
+            "Activate Saved Scenario…", self._activate_operating_scenario
+        )
+        self.deactivate_operating_scenario_action = self._action(
+            "Deactivate Operating Overlay", self._deactivate_operating_scenario
+        )
+        self.set_scenario_switch_action = self._action(
+            "Set Selected Switch State in Scenario…", self._set_selected_scenario_switch_position
+        )
+        self.analyze_operating_scenario_action = self._action(
+            "Analyze Active Scenario", self._analyze_active_operating_scenario
+        )
+        for action in (
+            self.capture_operating_scenario_action,
+            self.activate_operating_scenario_action,
+            self.deactivate_operating_scenario_action,
+            self.set_scenario_switch_action,
+            self.analyze_operating_scenario_action,
+        ):
+            operations_menu.addAction(action)
+
         analysis_menu = bar.addMenu("&Analysis")
         self.run_action = self._action("Run Study", self._run_fault_study, "F5")
         self.run_action.setToolTip("Run the configured short-circuit study")
@@ -477,9 +577,14 @@ class WorkbenchWindow(QMainWindow):
         analysis_menu.addAction(self.run_action)
 
         self.view_menu = bar.addMenu("&View")
-        self.theme_action = self._action(
-            "Use Light Theme" if self._dark_theme else "Use Dark Theme",
-            self._toggle_theme,
+        self.theme_action = self._action("Dark mode", self._toggle_theme)
+        self.theme_action.setCheckable(True)
+        self.theme_action.setChecked(self._dark_theme)
+        self.theme_action.setToolTip(
+            "Toggle the workbench shell theme. The engineering drawing sheet remains light."
+        )
+        self.theme_action.setIcon(
+            self._awesome_icon("fa5s.moon", QStyle.StandardPixmap.SP_DialogHelpButton)
         )
         self.view_menu.addAction(self.theme_action)
         self.show_source_candidates_action = QAction("Show QET drawing-only candidates", self)
@@ -509,6 +614,16 @@ class WorkbenchWindow(QMainWindow):
             "Keyboard Shortcuts…", self._show_keyboard_shortcuts, "F1"
         )
         help_menu.addAction(self.keyboard_shortcuts_action)
+        help_menu.addSeparator()
+        self.check_updates_action = self._action(
+            "Check for Updates…", lambda: self._check_for_updates(automatic=False)
+        )
+        help_menu.addAction(self.check_updates_action)
+        self.check_updates_on_startup_action = QAction("Check for Updates at Startup", self)
+        self.check_updates_on_startup_action.setCheckable(True)
+        self.check_updates_on_startup_action.setChecked(self._updates_on_startup)
+        self.check_updates_on_startup_action.toggled.connect(self._set_update_check_preference)
+        help_menu.addAction(self.check_updates_on_startup_action)
         help_menu.addSeparator()
         help_menu.addAction(self._action("About POWER_FAULT_ANALYZER", self._about))
 
@@ -630,9 +745,9 @@ class WorkbenchWindow(QMainWindow):
         toolbar.setObjectName("EngineeringCommandBar")
         toolbar.setMovable(False)
         toolbar.setFloatable(False)
-        toolbar.setIconSize(QSize(20, 20))
+        toolbar.setIconSize(QSize(17, 17))
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        toolbar.setContentsMargins(8, 3, 8, 3)
+        toolbar.setContentsMargins(5, 1, 5, 1)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
         self.command_toolbar = toolbar
 
@@ -653,12 +768,6 @@ class WorkbenchWindow(QMainWindow):
             action.setIcon(self._awesome_icon(icon, fallback))
             toolbar.addAction(action)
 
-        def add_section_label(title: str) -> None:
-            label = QLabel(title.upper())
-            label.setObjectName("CommandSectionLabel")
-            toolbar.addWidget(label)
-
-        add_section_label("Project")
         self.quick_toolbar = toolbar
         add_existing(self.new_action, "fa5s.file", QStyle.StandardPixmap.SP_FileIcon)
         add_existing(
@@ -666,7 +775,6 @@ class WorkbenchWindow(QMainWindow):
         )
         add_existing(self.save_action, "fa5s.save", QStyle.StandardPixmap.SP_DialogSaveButton)
         toolbar.addSeparator()
-        add_section_label("Network")
         self.model_toolbar = toolbar
         add_command(
             "Bus",
@@ -697,7 +805,6 @@ class WorkbenchWindow(QMainWindow):
             QStyle.StandardPixmap.SP_ArrowRight,
         )
         toolbar.addSeparator()
-        add_section_label("Diagram")
         self.diagram_toolbar = toolbar
         rotate_cw_toolbar = add_command(
             "Rotate ↻",
@@ -716,7 +823,6 @@ class WorkbenchWindow(QMainWindow):
         self.rotate_cw_toolbar_action = rotate_cw_toolbar
         self.rotate_ccw_toolbar_action = rotate_ccw_toolbar
         toolbar.addSeparator()
-        add_section_label("Study & Export")
         self.analysis_toolbar = toolbar
         add_existing(self.run_action, "fa5s.play", QStyle.StandardPixmap.SP_MediaPlay)
         self.export_diagram_action.setText("Export SVG")
@@ -724,6 +830,8 @@ class WorkbenchWindow(QMainWindow):
             self._awesome_icon("fa5s.file-image", QStyle.StandardPixmap.SP_DialogSaveButton)
         )
         toolbar.addAction(self.export_diagram_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.theme_action)
 
     # ------------------------------------------------------------- main layout
     def _panel(self, title: str, content: QWidget, *, show_heading: bool = True) -> QFrame:
@@ -731,6 +839,7 @@ class WorkbenchWindow(QMainWindow):
         panel_key = "".join(character if character.isalnum() else "_" for character in title)
         panel.setObjectName(f"WorkbenchPanel_{panel_key.strip('_')}")
         panel.setProperty("workbenchPanel", True)
+        content.setProperty("workbenchPanelContent", True)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(8, 7, 8, 8)
         layout.setSpacing(6)
@@ -746,8 +855,8 @@ class WorkbenchWindow(QMainWindow):
     def _build_docks(self) -> None:
         explorer_content = QWidget()
         explorer_layout = QVBoxLayout(explorer_content)
-        explorer_layout.setContentsMargins(10, 10, 10, 10)
-        explorer_layout.setSpacing(8)
+        explorer_layout.setContentsMargins(8, 7, 8, 7)
+        explorer_layout.setSpacing(6)
         explorer_heading = QLabel("PROJECT STRUCTURE")
         explorer_heading.setObjectName("SectionEyebrow")
         explorer_layout.addWidget(explorer_heading)
@@ -768,8 +877,8 @@ class WorkbenchWindow(QMainWindow):
 
         palette = QWidget()
         palette_layout = QVBoxLayout(palette)
-        palette_layout.setContentsMargins(10, 10, 10, 10)
-        palette_layout.setSpacing(10)
+        palette_layout.setContentsMargins(8, 7, 8, 7)
+        palette_layout.setSpacing(7)
         palette_intro = QLabel("CORE NETWORK EQUIPMENT")
         palette_intro.setObjectName("SectionEyebrow")
         palette_layout.addWidget(palette_intro)
@@ -809,7 +918,7 @@ class WorkbenchWindow(QMainWindow):
         ):
             button = QPushButton(f"{label}\n{title}")
             button.setObjectName("EquipmentTile")
-            button.setMinimumHeight(76)
+            button.setMinimumHeight(58)
             button.setIcon(self._awesome_icon(icon_name, fallback_icon))
             button.setIconSize(QSize(24, 24))
             button.setToolTip(f"Insert {title}")
@@ -827,7 +936,7 @@ class WorkbenchWindow(QMainWindow):
                 "fa5s.project-diagram", QStyle.StandardPixmap.SP_FileDialogContentsView
             )
         )
-        template_button.setMinimumHeight(40)
+        template_button.setMinimumHeight(34)
         template_button.clicked.connect(self._load_reference_template)
         palette_layout.addWidget(template_button)
         substation_button = QPushButton("Build PFA-ES-001 · 220 kV Double Bus")
@@ -836,7 +945,7 @@ class WorkbenchWindow(QMainWindow):
         substation_button.setIcon(
             self._awesome_icon("fa5s.subway", QStyle.StandardPixmap.SP_ComputerIcon)
         )
-        substation_button.setMinimumHeight(44)
+        substation_button.setMinimumHeight(36)
         substation_button.setToolTip(
             "Builds a double-bus substation with explicit switch topology and unresolved "
             "line/transformer data boundaries. No synthetic electrical parameters are added."
@@ -851,12 +960,91 @@ class WorkbenchWindow(QMainWindow):
         self.properties.setColumnWidth(0, 155)
         properties_content = QWidget()
         properties_layout = QVBoxLayout(properties_content)
-        properties_layout.setContentsMargins(10, 10, 10, 10)
-        properties_layout.setSpacing(8)
+        properties_layout.setContentsMargins(8, 7, 8, 7)
+        properties_layout.setSpacing(7)
         properties_heading = QLabel("SELECTION PROPERTIES")
         properties_heading.setObjectName("SectionEyebrow")
         properties_layout.addWidget(properties_heading)
+        empty_container = QWidget()
+        empty_container.setObjectName("InspectorEmptyContainer")
+        empty_layout = QVBoxLayout(empty_container)
+        empty_layout.setContentsMargins(0, 4, 0, 0)
+        empty_layout.setSpacing(10)
+
+        # The inspector remains useful before an object is selected. It reports
+        # live model scope instead of leaving a large, empty property pane.
+        self.inspector_overview_card = QFrame()
+        self.inspector_overview_card.setObjectName("InspectorOverviewCard")
+        overview_layout = QVBoxLayout(self.inspector_overview_card)
+        overview_layout.setContentsMargins(12, 12, 12, 12)
+        overview_layout.setSpacing(5)
+        overview_eyebrow = QLabel("ACTIVE NETWORK")
+        overview_eyebrow.setObjectName("InspectorOverviewEyebrow")
+        self.inspector_network_name = QLabel("Network 1")
+        self.inspector_network_name.setObjectName("InspectorOverviewTitle")
+        self.inspector_network_meta = QLabel("System base — · Reference voltage —")
+        self.inspector_network_meta.setObjectName("InspectorOverviewMeta")
+        overview_layout.addWidget(overview_eyebrow)
+        overview_layout.addWidget(self.inspector_network_name)
+        overview_layout.addWidget(self.inspector_network_meta)
+
+        metric_grid = QGridLayout()
+        metric_grid.setContentsMargins(0, 6, 0, 0)
+        metric_grid.setHorizontalSpacing(8)
+        metric_grid.setVerticalSpacing(0)
+
+        def add_overview_metric(column: int, caption: str) -> QLabel:
+            metric = QFrame()
+            metric.setObjectName("InspectorMetricCard")
+            metric_layout = QVBoxLayout(metric)
+            metric_layout.setContentsMargins(9, 8, 9, 8)
+            metric_layout.setSpacing(2)
+            caption_label = QLabel(caption.upper())
+            caption_label.setObjectName("InspectorMetricCaption")
+            value_label = QLabel("0")
+            value_label.setObjectName("InspectorMetricValue")
+            metric_layout.addWidget(caption_label)
+            metric_layout.addWidget(value_label)
+            metric_grid.addWidget(metric, 0, column)
+            return value_label
+
+        self.inspector_bus_count = add_overview_metric(0, "Buses")
+        self.inspector_equipment_count = add_overview_metric(1, "Equipment")
+        self.inspector_study_count = add_overview_metric(2, "Studies")
+        overview_layout.addLayout(metric_grid)
+        empty_layout.addWidget(self.inspector_overview_card)
+
+        self.properties_empty_state = QFrame()
+        self.properties_empty_state.setObjectName("InspectorEmptyState")
+        empty_card_layout = QVBoxLayout(self.properties_empty_state)
+        empty_card_layout.setContentsMargins(12, 12, 12, 12)
+        empty_card_layout.setSpacing(5)
+        empty_eyebrow = QLabel("OBJECT INSPECTOR")
+        empty_eyebrow.setObjectName("InspectorEmptyEyebrow")
+        empty_title = QLabel("No element selected")
+        empty_title.setObjectName("InspectorEmptyTitle")
+        empty_description = QLabel(
+            "Select a bus, branch, transformer, source or switching device in the "
+            "diagram or project tree to inspect its electrical parameters and connections."
+        )
+        empty_description.setObjectName("InspectorEmptyDescription")
+        empty_description.setWordWrap(True)
+        empty_card_layout.addWidget(empty_eyebrow)
+        empty_card_layout.addWidget(empty_title)
+        empty_card_layout.addWidget(empty_description)
+        empty_layout.addWidget(self.properties_empty_state)
+        empty_layout.addStretch(1)
+        self.properties_empty_container = empty_container
+        properties_layout.addWidget(self.properties_empty_container, 0)
+
+        # The property table must be parented into the inspector layout. Without
+        # this, QWidget.show() opens an orphan top-level widget instead of showing
+        # the selected object's parameters inside the right-hand Properties pane.
+        self.properties.setAlternatingRowColors(True)
+        self.properties.setRootIsDecorated(False)
+        self.properties.setUniformRowHeights(True)
         properties_layout.addWidget(self.properties, 1)
+        self.properties.hide()
 
         self.property_editor_widget = QWidget()
         self.property_editor_widget.setObjectName("TransactionalPropertyEditor")
@@ -952,7 +1140,7 @@ class WorkbenchWindow(QMainWindow):
             self._awesome_icon("fa5s.shapes", QStyle.StandardPixmap.SP_FileDialogContentsView),
             "Source Library",
         )
-        self.inspector_tabs.setMinimumWidth(315)
+        self.inspector_tabs.setMinimumWidth(275)
 
         self.console = QPlainTextEdit()
         self.console.setReadOnly(True)
@@ -1016,6 +1204,7 @@ class WorkbenchWindow(QMainWindow):
 
     def _build_central_workspace(self) -> None:
         self.workspace_tabs = QTabWidget()
+        self.workspace_tabs.setObjectName("MainWorkspaceTabs")
         self.canvas = NetworkCanvasView()
         if self.symbol_browser.catalog is not None:
             self.canvas.set_symbol_definitions(
@@ -1029,14 +1218,15 @@ class WorkbenchWindow(QMainWindow):
         # Keep the diagram itself as the dominant document surface. Its context
         # controls live in a shallow document bar rather than in floating panels.
         design_page = QWidget()
+        design_page.setObjectName("NetworkDesignPage")
         design_layout = QVBoxLayout(design_page)
         design_layout.setContentsMargins(0, 0, 0, 0)
         design_layout.setSpacing(0)
         self.diagram_header = QFrame()
         self.diagram_header.setObjectName("DiagramDocumentBar")
         header_layout = QHBoxLayout(self.diagram_header)
-        header_layout.setContentsMargins(16, 8, 14, 8)
-        header_layout.setSpacing(10)
+        header_layout.setContentsMargins(12, 4, 10, 4)
+        header_layout.setSpacing(7)
         document_identity = QVBoxLayout()
         document_identity.setSpacing(1)
         self.diagram_eyebrow = QLabel("NETWORK MODEL  /  SINGLE-LINE DIAGRAM")
@@ -1080,12 +1270,26 @@ class WorkbenchWindow(QMainWindow):
         self.snap_toggle.toggled.connect(self._set_snap_enabled)
         header_layout.addWidget(self.snap_toggle)
 
-        fit_button = QPushButton("Fit")
+        zoom_out_button = QToolButton()
+        zoom_out_button.setObjectName("DiagramZoomButton")
+        zoom_out_button.setText("−")
+        zoom_out_button.setToolTip("Zoom out (Ctrl+- or mouse wheel)")
+        zoom_out_button.clicked.connect(lambda: self._zoom_diagram(1 / 1.2))
+        header_layout.addWidget(zoom_out_button)
+
+        zoom_in_button = QToolButton()
+        zoom_in_button.setObjectName("DiagramZoomButton")
+        zoom_in_button.setText("+")
+        zoom_in_button.setToolTip("Zoom in (Ctrl++ or mouse wheel)")
+        zoom_in_button.clicked.connect(lambda: self._zoom_diagram(1.2))
+        header_layout.addWidget(zoom_in_button)
+
+        fit_button = QPushButton("Fit All")
         fit_button.setObjectName("DiagramFitButton")
         fit_button.setIcon(
             self._awesome_icon("fa5s.expand", QStyle.StandardPixmap.SP_TitleBarMaxButton)
         )
-        fit_button.setToolTip("Fit all visible diagram objects in the drawing area")
+        fit_button.setToolTip("Fit the complete active network diagram into the viewport")
         fit_button.clicked.connect(self._fit_diagram)
         header_layout.addWidget(fit_button)
 
@@ -1116,7 +1320,7 @@ class WorkbenchWindow(QMainWindow):
 
         self.main_splitter = _EngineeringSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.setObjectName("MainWorkspaceSplitter")
-        self.main_splitter.setHandleWidth(8)
+        self.main_splitter.setHandleWidth(9)
         self.main_splitter.setChildrenCollapsible(True)
         self.main_splitter.addWidget(self.explorer_panel)
         self.main_splitter.addWidget(self.workspace_tabs)
@@ -1124,8 +1328,8 @@ class WorkbenchWindow(QMainWindow):
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
         self.main_splitter.setStretchFactor(2, 0)
-        self.explorer_panel.setMinimumWidth(205)
-        self.inspector_tabs.setMinimumWidth(315)
+        self.explorer_panel.setMinimumWidth(190)
+        self.inspector_tabs.setMinimumWidth(275)
         self.main_splitter.setCollapsible(0, True)
         self.main_splitter.setCollapsible(1, False)
         self.main_splitter.setCollapsible(2, True)
@@ -1134,7 +1338,7 @@ class WorkbenchWindow(QMainWindow):
             handle = self.main_splitter.handle(index)
             handle.setCursor(Qt.CursorShape.SplitHCursor)
             handle.setToolTip("Drag to resize or collapse the workspace sidebar")
-        self.main_splitter.setSizes([235, 1_000, 365])
+        self.main_splitter.setSizes([205, 1_000, 300])
         self.setCentralWidget(self.main_splitter)
 
     def _restore_workspace_layout(self) -> None:
@@ -1148,7 +1352,7 @@ class WorkbenchWindow(QMainWindow):
         if main_splitter_state is not None:
             self.main_splitter.restoreState(main_splitter_state)
         else:
-            self.main_splitter.setSizes([235, 1_000, 365])
+            self.main_splitter.setSizes([205, 1_000, 300])
         inspector_index = self._ui_settings.value("layout/inspector_tab", 0, type=int)
         if 0 <= inspector_index < self.inspector_tabs.count():
             self.inspector_tabs.setCurrentIndex(inspector_index)
@@ -1190,7 +1394,7 @@ class WorkbenchWindow(QMainWindow):
         for panel, action in self._panel_actions.items():
             panel.show()
             action.setChecked(True)
-        self.main_splitter.setSizes([235, 1_000, 365])
+        self.main_splitter.setSizes([205, 1_000, 300])
         self.inspector_tabs.setCurrentWidget(self.palette_panel)
         self.show_source_candidates_action.setChecked(False)
         self.canvas.set_source_candidate_visibility(False)
@@ -1223,6 +1427,11 @@ class WorkbenchWindow(QMainWindow):
                 self, "Code & Automation", "Script did not return a valid workspace."
             )
             return
+        if not self._confirm_discard():
+            self._log(
+                "Code & Automation result was not applied; the active project was preserved."
+            )
+            return
         self.project = self.services.project_workspace.create(workspace.network.name)
         self.project_path = None
         self.workspace = workspace
@@ -1239,6 +1448,7 @@ class WorkbenchWindow(QMainWindow):
         self._dirty = True
         self.workspace_tabs.setCurrentIndex(0)
         self._log("Network workspace replaced from Code & Automation Studio.")
+        QTimer.singleShot(100, self._fit_diagram)
         self.statusBar().showMessage(
             "Script-built network rendered · structural validation passed", 7000
         )
@@ -1264,9 +1474,6 @@ class WorkbenchWindow(QMainWindow):
         except KeyError as exc:
             QMessageBox.warning(self, "Insert Source Symbol", str(exc))
             return
-        # An explicit insert request must reveal the drawing-only layer first.
-        # Qt does not allow an invisible QGraphicsItem to become selected.
-        self.show_source_candidates_action.setChecked(True)
         center = self.canvas.mapToScene(self.canvas.viewport().rect().center())
         # A source symbol is positioned by its declared hotspot, not by a guessed
         # top-left corner. This keeps the electrical reference point under the cursor.
@@ -1274,11 +1481,16 @@ class WorkbenchWindow(QMainWindow):
         anchor_y = center.y()
         if self.workspace.snap_enabled:
             grid = self.workspace.grid_spacing
-            anchor_x = round(anchor_x / grid) * grid
-            anchor_y = round(anchor_y / grid) * grid
+            snapped = snap_point(Point(anchor_x, anchor_y), grid)
+            anchor_x, anchor_y = snapped.x, snapped.y
         x = anchor_x - definition.hotspot.x
         y = anchor_y - definition.hotspot.y
         placement = DiagramSymbolPlacement.create(asset_id, x, y, rotation_deg)
+        # Explicit insertion must reveal the drawing-only layer before the new
+        # graphics item is created; QGraphicsScene cannot select hidden items.
+        # Keep the menu action and canvas layer state synchronized.
+        if not self.show_source_candidates_action.isChecked():
+            self.show_source_candidates_action.setChecked(True)
         self._undo_stack.push(_AddDiagramSymbolCommand(self, placement, definition))
         self.canvas.setFocus()
         self.statusBar().showMessage(
@@ -1405,6 +1617,7 @@ class WorkbenchWindow(QMainWindow):
         self.export_action.setEnabled(False)
         self._dirty = True
         self._refresh_all()
+        QTimer.singleShot(100, self._fit_diagram)
         self._log(
             "Loaded REF-3PH-001B physical network template: one AC bus and one explicit "
             "Thevenin equivalent source."
@@ -1433,6 +1646,7 @@ class WorkbenchWindow(QMainWindow):
         self.export_action.setEnabled(False)
         self._dirty = True
         self._refresh_all()
+        QTimer.singleShot(100, self._fit_diagram)
         report = built.validation
         self._log(
             "Built PFA-ES-001: 220 kV double bus, two bays, eight explicit switchgear devices, "
@@ -1457,11 +1671,27 @@ class WorkbenchWindow(QMainWindow):
     def _network_sidecar(project_path: Path) -> Path:
         return project_path.with_suffix(project_path.suffix + ".network.json")
 
+    @staticmethod
+    def _default_projects_directory() -> Path:
+        """Return a per-user project directory outside the application installation."""
+        documents = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+        base = Path(documents) if documents else Path.home() / "Documents"
+        directory = base / "POWER_FAULT_ANALYZER" / "Projects"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
     def _open_project(self) -> None:
         if not self._confirm_discard():
             return
+        initial_directory = (
+            self.project_path.parent
+            if self.project_path is not None
+            else self._default_projects_directory()
+        )
         selected, _ = QFileDialog.getOpenFileName(
-            self, "Open PFA Project", "", "PFA Project (*.pfa)"
+            self, "Open PFA Project", str(initial_directory), "PFA Project (*.pfa)"
         )
         if not selected:
             return
@@ -1491,6 +1721,7 @@ class WorkbenchWindow(QMainWindow):
         ]
         self._dirty = False
         self._refresh_all()
+        QTimer.singleShot(100, self._fit_diagram)
         self._log(f"Opened project: {path}")
 
     def _save_project(self) -> bool:
@@ -1513,8 +1744,13 @@ class WorkbenchWindow(QMainWindow):
         return True
 
     def _save_project_as(self) -> bool:
+        initial_path = (
+            self.project_path
+            if self.project_path is not None
+            else self._default_projects_directory() / f"{self.project.name}.pfa"
+        )
         selected, _ = QFileDialog.getSaveFileName(
-            self, "Save PFA Project", f"{self.project.name}.pfa", "PFA Project (*.pfa)"
+            self, "Save PFA Project", str(initial_path), "PFA Project (*.pfa)"
         )
         if not selected:
             return False
@@ -1790,6 +2026,140 @@ class WorkbenchWindow(QMainWindow):
         except (NetworkDomainError, ValueError, TypeError, KeyError) as exc:
             QMessageBox.warning(self, "Remove Element", str(exc))
 
+    def _commit_operating_workspace_commands(self, commands: tuple[object, ...], label: str) -> None:
+        """Preflight scenario commands, then put one complete snapshot on Qt undo/redo."""
+        before = deepcopy(self.workspace)
+        preview = deepcopy(self.workspace)
+        NetworkWorkspaceCommands(preview, source="workbench-operations-preflight").execute_many(commands)
+        after = deepcopy(preview)
+        self._undo_stack.push(_OperatingWorkspaceSnapshotCommand(self, before, after, label))
+
+    def _apply_operating_workspace_snapshot(self, snapshot: NetworkWorkspace, message: str) -> None:
+        self.commands.execute(_RestoreWorkspaceSnapshot(snapshot))
+        self._operating_state_changed(message)
+
+    def _operating_state_changed(self, message: str) -> None:
+        """Refresh only the scenario projection; physical-network studies remain valid."""
+        self._dirty = True
+        self.canvas.set_workspace(self.workspace)
+        self._update_title()
+        self._update_diagram_header()
+        self._log(message)
+        self.statusBar().showMessage(message, 7000)
+
+    def _capture_operating_scenario(self) -> None:
+        name, accepted = QInputDialog.getText(
+            self, "Capture Operating Scenario", "Scenario name:", text="Normal operation"
+        )
+        if not accepted:
+            return
+        if not name.strip():
+            QMessageBox.warning(self, "Operating Scenario", "Scenario name cannot be empty.")
+            return
+        try:
+            scenario = scenario_from_physical_network(
+                self.workspace.network, name.strip(),
+                description="Captured from physical equipment positions; simulation overlay only.",
+            )
+            self._commit_operating_workspace_commands(
+                (UpsertOperatingScenario(scenario), SetActiveOperatingScenario(scenario.scenario_id)),
+                "Capture and activate operating scenario",
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            QMessageBox.warning(self, "Operating Scenario", str(exc))
+
+    def _activate_operating_scenario(self) -> None:
+        scenarios = sorted(
+            self.workspace.operating_scenarios.values(), key=lambda item: item.name.casefold()
+        )
+        if not scenarios:
+            QMessageBox.information(self, "Operating Scenario", "No saved operating scenarios exist.")
+            return
+        labels = {
+            f"{item.name} [{str(item.scenario_id)[:8]}]": item.scenario_id for item in scenarios
+        }
+        selected, accepted = QInputDialog.getItem(
+            self, "Activate Operating Scenario", "Scenario:", list(labels), 0, False
+        )
+        if not accepted:
+            return
+        try:
+            self._commit_operating_workspace_commands(
+                (SetActiveOperatingScenario(labels[selected]),), "Activate operating scenario"
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            QMessageBox.warning(self, "Operating Scenario", str(exc))
+
+    def _deactivate_operating_scenario(self) -> None:
+        if self.workspace.active_operating_scenario_id is None:
+            return
+        try:
+            self._commit_operating_workspace_commands(
+                (SetActiveOperatingScenario(None),), "Deactivate operating overlay"
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            QMessageBox.warning(self, "Operating Scenario", str(exc))
+
+    def _set_selected_scenario_switch_position(self) -> None:
+        scenario = self.workspace.active_operating_scenario
+        if scenario is None:
+            QMessageBox.information(
+                self, "Operating Scenario", "Activate an operating scenario first."
+            )
+            return
+        selected = self.canvas.selected_element_refs()
+        equipment_ids = [
+            UUID(identifier) for kind, identifier in selected
+            if kind in {"equipment", "line"}
+        ]
+        if len(equipment_ids) != 1:
+            QMessageBox.information(
+                self, "Operating Scenario", "Select exactly one switching device on the diagram."
+            )
+            return
+        try:
+            equipment = self.workspace.network.get_equipment(equipment_ids[0])
+            if not isinstance(equipment, SwitchingDevice):
+                raise TypeError("The selected equipment is not a switching device.")
+            current = scenario.switch_positions.get(
+                equipment.id,
+                OperatingSwitchPosition(equipment.position.value),
+            )
+            options = ["Open", "Closed"]
+            default_index = 0 if current is OperatingSwitchPosition.OPEN else 1
+            selected_position, accepted = QInputDialog.getItem(
+                self, "Simulated Switch Position", equipment.name, options, default_index, False
+            )
+            if not accepted:
+                return
+            target = (
+                OperatingSwitchPosition.OPEN
+                if selected_position == "Open" else OperatingSwitchPosition.CLOSED
+            )
+            self._commit_operating_workspace_commands(
+                (SetOperatingScenarioSwitchPosition(scenario.scenario_id, equipment.id, target),),
+                "Change simulated switch position",
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            QMessageBox.warning(self, "Operating Scenario", str(exc))
+
+    def _analyze_active_operating_scenario(self) -> None:
+        try:
+            result = analyze_workspace(self.workspace)
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            QMessageBox.warning(self, "Operating Scenario Analysis", str(exc))
+            return
+        summary = (
+            f"Scenario: {result.scenario_name}\n"
+            f"Buses: {len(result.buses)}\n"
+            f"Energized: {len(result.energized_bus_ids)}\n"
+            f"De-energized: {len(result.deenergized_bus_ids)}\n"
+            f"Islands: {len(result.islands)}\n"
+            f"Diagnostics: {len(result.diagnostics)}\n\n"
+            "This is a topology/connectivity assessment, not an AC load-flow or safety clearance."
+        )
+        QMessageBox.information(self, "Operating Scenario Analysis", summary)
+
     def _model_changed(self, message: str) -> None:
         self._dirty = True
         self._active_execution = None
@@ -2034,8 +2404,8 @@ class WorkbenchWindow(QMainWindow):
             new_x, new_y = old_x + delta_x, old_y + delta_y
             if self.workspace.snap_enabled:
                 spacing = float(self.workspace.grid_spacing)
-                new_x = round(new_x / spacing) * spacing
-                new_y = round(new_y / spacing) * spacing
+                snapped = snap_point(Point(new_x, new_y), spacing)
+                new_x, new_y = snapped.x, snapped.y
             if abs(new_x - old_x) + abs(new_y - old_y) > 1e-9:
                 moves[identifier] = (old_x, old_y, new_x, new_y)
         if moves:
@@ -2096,15 +2466,21 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
         QMessageBox.information(self, "POWER_FAULT_ANALYZER — Keyboard Shortcuts", message)
 
     def _fit_diagram(self) -> None:
+        """Fit the complete electrical drawing with proportional, bounded margins."""
         bounds = self.canvas.scene().itemsBoundingRect()
         if bounds.isEmpty():
             self.statusBar().showMessage(
                 "The diagram is empty; add a busbar or open a reference case.", 4500
             )
             return
-        self.canvas.fitInView(
-            bounds.adjusted(-100, -100, 100, 100), Qt.AspectRatioMode.KeepAspectRatio
-        )
+        # A fixed 100-unit margin made small networks appear unnecessarily tiny.
+        # Scale the margin to the actual diagram extent, with a minimum clearance.
+        margin_x = max(24.0, bounds.width() * 0.12)
+        margin_y = max(24.0, bounds.height() * 0.12)
+        target = bounds.adjusted(-margin_x, -margin_y, margin_x, margin_y)
+        self.canvas.fitInView(target, Qt.AspectRatioMode.KeepAspectRatio)
+        self.canvas.viewport().update()
+        self.statusBar().showMessage("Diagram fitted to all visible network elements.", 2200)
 
     def _set_grid_visible(self, visible: bool) -> None:
         self.canvas.set_grid_visible(visible)
@@ -2122,9 +2498,25 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
     def _toggle_snap(self) -> None:
         self._set_snap_enabled(not self.workspace.snap_enabled)
 
+    def _update_inspector_overview(self) -> None:
+        """Refresh the live model-scope summary shown when nothing is selected."""
+        if not hasattr(self, "inspector_network_name"):
+            return
+        network = self.workspace.network
+        settings = self.project.study_settings
+        self.inspector_network_name.setText(network.name)
+        self.inspector_network_meta.setText(
+            f"System base {settings.base_power_mva:g} MVA  ·  "
+            f"Reference voltage {settings.base_voltage_ll_kv:g} kV"
+        )
+        self.inspector_bus_count.setText(str(len(network.buses)))
+        self.inspector_equipment_count.setText(str(len(network.equipment)))
+        self.inspector_study_count.setText(str(len(self.workspace.study_history)))
+
     def _update_diagram_header(self) -> None:
         network = self.workspace.network
         self.diagram_title.setText(network.name)
+        self._update_inspector_overview()
         bus_count = len(network.buses)
         equipment_count = len(network.equipment)
         symbol_count = len(self.workspace.diagram_symbols)
@@ -2173,7 +2565,11 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
         root.setIcon(0, self._awesome_icon("fa5s.folder", QStyle.StandardPixmap.SP_DirIcon))
         root.setData(0, Qt.ItemDataRole.UserRole, ("project", str(self.project.project_id)))
         self.explorer.addTopLevelItem(root)
-        network_node = QTreeWidgetItem([f"Networks ({len(self.workspace.network.buses)} buses)"])
+        bus_count = len(self.workspace.network.buses)
+        bus_word = "bus" if bus_count == 1 else "buses"
+        network_node = QTreeWidgetItem(
+            [f"{self.workspace.network.name} · {bus_count} {bus_word}"]
+        )
         network_node.setIcon(
             0, self._awesome_icon("fa5s.project-diagram", QStyle.StandardPixmap.SP_DirIcon)
         )
@@ -2246,6 +2642,10 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
             "other": "fa5s.cube",
         }
         for title, elements in groups.items():
+            # Do not advertise empty model classes as if they were usable project
+            # objects. Supported categories appear as soon as they contain data.
+            if not elements:
+                continue
             group = QTreeWidgetItem([f"{title} ({len(elements)})"])
             group.setIcon(
                 0, self._awesome_icon(group_icons[title], QStyle.StandardPixmap.SP_DirIcon)
@@ -2258,23 +2658,6 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
                 )
                 leaf.setData(0, Qt.ItemDataRole.UserRole, (kind, str(element.id)))
                 group.addChild(leaf)
-        for title, reason in (
-            (
-                "Concrete Transformer Models",
-                "Transformer boundary placeholders are present, but no concrete two-winding transformer is calculation-ready until nameplate and sequence data are supplied.",
-            ),
-            ("Motors", "Motor domain models exist; desktop creation workflow is not enabled yet."),
-            ("Loads", "No load equipment model is available in the current domain package."),
-            ("Protection Devices", "Protection study integration is outside this increment."),
-            (
-                "Grounding",
-                "Grounding is edited through supported equipment models, not as standalone nodes.",
-            ),
-        ):
-            unavailable = QTreeWidgetItem([f"{title} — unavailable"])
-            unavailable.setToolTip(0, reason)
-            unavailable.setFlags(unavailable.flags() & ~Qt.ItemFlag.ItemIsEnabled)
-            network_node.addChild(unavailable)
         mapped_symbols = [
             item for item in self.workspace.diagram_symbols.values() if item.equipment_id
         ]
@@ -2285,6 +2668,8 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
             ("Mapped Source-Symbol Candidates", mapped_symbols),
             ("Drawing-Only Source Symbols", drawing_only_symbols),
         ):
+            if not placements:
+                continue
             symbol_group = QTreeWidgetItem([f"{title} ({len(placements)})"])
             symbol_group.setIcon(
                 0, self._awesome_icon("fa5s.shapes", QStyle.StandardPixmap.SP_DirIcon)
@@ -2306,33 +2691,24 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
                 )
                 symbol_group.addChild(leaf)
 
-        studies = QTreeWidgetItem([f"Fault Studies ({len(self._session_runs)})"])
-        studies.setIcon(0, self._awesome_icon("fa5s.bolt", QStyle.StandardPixmap.SP_DirIcon))
-        root.addChild(studies)
-        for record in self.workspace.study_history:
-            leaf = QTreeWidgetItem(
-                [
-                    f"{record.study_name} · {record.result.fault_type.value} · {record.fault_bus_name}"
-                ]
+        study_records = self.workspace.study_history
+        if study_records:
+            studies = QTreeWidgetItem([f"Studies & Results ({len(study_records)})"])
+            studies.setIcon(
+                0, self._awesome_icon("fa5s.chart-line", QStyle.StandardPixmap.SP_DirIcon)
             )
-            leaf.setData(0, Qt.ItemDataRole.UserRole, ("study", str(record.run_id)))
-            studies.addChild(leaf)
-        results_node = QTreeWidgetItem([f"Results ({len(self.workspace.study_history)})"])
-        results_node.setIcon(
-            0, self._awesome_icon("fa5s.chart-line", QStyle.StandardPixmap.SP_DirIcon)
-        )
-        root.addChild(results_node)
-        for index, record in enumerate(self.workspace.study_history, start=1):
-            leaf = QTreeWidgetItem(
-                [
-                    f"Run {index}: {record.study_name} ({record.result.fault_type.value} @ {record.fault_bus_name})"
-                ]
-            )
-            leaf.setData(0, Qt.ItemDataRole.UserRole, ("study", str(record.run_id)))
-            results_node.addChild(leaf)
-        reports = QTreeWidgetItem(["Reports"])
-        reports.setIcon(0, self._awesome_icon("fa5s.file-pdf", QStyle.StandardPixmap.SP_DirIcon))
-        root.addChild(reports)
+            root.addChild(studies)
+            for index, record in enumerate(study_records, start=1):
+                leaf = QTreeWidgetItem(
+                    [
+                        (
+                            f"{index:02d} · {record.study_name} · "
+                            f"{record.result.fault_type.value} @ {record.fault_bus_name}"
+                        )
+                    ]
+                )
+                leaf.setData(0, Qt.ItemDataRole.UserRole, ("study", str(record.run_id)))
+                studies.addChild(leaf)
         self.explorer.addTopLevelItem(root)
         self.explorer.expandToDepth(2)
         if hasattr(self, "explorer_search"):
@@ -2492,6 +2868,8 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
         except (KeyError, ValueError, TypeError) as exc:
             self._log(f"Properties inspector could not resolve selection: {exc}")
             return
+        self.properties_empty_container.hide()
+        self.properties.show()
         self.properties.clear()
         for name, value in rows:
             self.properties.addTopLevelItem(QTreeWidgetItem([name, value]))
@@ -3011,7 +3389,13 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
         if hasattr(self, "switch_state_button"):
             self.switch_state_button.hide()
         self.properties.clear()
-        self.properties.addTopLevelItem(QTreeWidgetItem(["Selection", "Select a network element."]))
+        self.properties.hide()
+        if hasattr(self, "properties_empty_container"):
+            self.properties_empty_container.show()
+        if hasattr(self, "inspector_overview_card"):
+            self.inspector_overview_card.show()
+        if hasattr(self, "properties_empty_state"):
+            self.properties_empty_state.show()
 
     # ------------------------------------------------------------------- helpers
     def _mark_dirty(self, *_args) -> None:
@@ -3034,23 +3418,300 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
 
     def _log(self, message: str) -> None:
         self.console.appendPlainText(message)
+        severity_text = message.casefold()
+        diagnostic_markers = ("error", "warning", "failed", "exception", "blocked")
+        diagnostic_message = severity_text.startswith("invalid") or any(
+            marker in severity_text for marker in diagnostic_markers
+        )
+        if hasattr(self, "console_dock") and diagnostic_message:
+            self.console_dock.show()
+            self.console_dock.raise_()
 
     def _apply_theme(self, *, persist: bool = True) -> None:
+        """Apply the selected shell theme consistently to docked and floating panels."""
         theme = "dark" if self._dark_theme else "light"
-        self.setStyleSheet(stylesheet_for_theme(theme))
-        if hasattr(self, "canvas"):
-            self.canvas.set_visual_theme(theme)
+        stylesheet = (
+            _DARK_WORKBENCH_STYLESHEET if self._dark_theme else _LIGHT_WORKBENCH_STYLESHEET
+        )
+        application = QApplication.instance()
+        if application is not None:
+            palette = QPalette()
+            if self._dark_theme:
+                role_colors = {
+                    QPalette.ColorRole.Window: "#111922",
+                    QPalette.ColorRole.WindowText: "#E5EDF4",
+                    QPalette.ColorRole.Base: "#111B26",
+                    QPalette.ColorRole.AlternateBase: "#202E3C",
+                    QPalette.ColorRole.ToolTipBase: "#202E3C",
+                    QPalette.ColorRole.ToolTipText: "#E5EDF4",
+                    QPalette.ColorRole.Text: "#E5EDF4",
+                    QPalette.ColorRole.Button: "#202E3C",
+                    QPalette.ColorRole.ButtonText: "#E5EDF4",
+                    QPalette.ColorRole.Highlight: "#244B60",
+                    QPalette.ColorRole.HighlightedText: "#F5FAFC",
+                    QPalette.ColorRole.Link: "#29B6D1",
+                }
+            else:
+                role_colors = {
+                    QPalette.ColorRole.Window: "#F3F5F8",
+                    QPalette.ColorRole.WindowText: "#1D2939",
+                    QPalette.ColorRole.Base: "#FFFFFF",
+                    QPalette.ColorRole.AlternateBase: "#F8FAFC",
+                    QPalette.ColorRole.ToolTipBase: "#FFFFFF",
+                    QPalette.ColorRole.ToolTipText: "#1D2939",
+                    QPalette.ColorRole.Text: "#1D2939",
+                    QPalette.ColorRole.Button: "#FFFFFF",
+                    QPalette.ColorRole.ButtonText: "#344054",
+                    QPalette.ColorRole.Highlight: "#DCEAF4",
+                    QPalette.ColorRole.HighlightedText: "#173A57",
+                    QPalette.ColorRole.Link: "#1D6A83",
+                }
+            for role, color in role_colors.items():
+                palette.setColor(role, QColor(color))
+            application.setPalette(palette)
+            application.setStyleSheet(stylesheet)
+        else:
+            self.setStyleSheet(stylesheet)
+        # Keep the SLD as a neutral engineering sheet in both shell themes.
+        self.canvas.setBackgroundBrush(QColor("#F5F7F9"))
+        self.canvas.viewport().update()
         if hasattr(self, "theme_action"):
-            self.theme_action.setText(
-                "Use Light Theme" if self._dark_theme else "Use Dark Theme"
+            self.theme_action.setText("Dark mode")
+            self.theme_action.setChecked(self._dark_theme)
+            self.theme_action.setIcon(
+                self._awesome_icon(
+                    "fa5s.moon" if self._dark_theme else "fa5s.sun",
+                    QStyle.StandardPixmap.SP_DialogHelpButton,
+                )
+            )
+            self.theme_action.setToolTip(
+                "Dark workbench shell is active; the drawing sheet remains light."
+                if self._dark_theme
+                else "Light workbench shell is active; the drawing sheet remains light."
             )
         if persist:
             self._ui_settings.setValue("appearance/theme", theme)
             self._ui_settings.sync()
 
-    def _toggle_theme(self) -> None:
-        self._dark_theme = not self._dark_theme
+    def _toggle_theme(self, checked: bool | None = None) -> None:
+        self._dark_theme = not self._dark_theme if checked is None else bool(checked)
         self._apply_theme(persist=True)
+
+    def _set_update_check_preference(self, enabled: bool) -> None:
+        self._updates_on_startup = bool(enabled)
+        self._ui_settings.setValue("updates/check_on_startup", self._updates_on_startup)
+        self._ui_settings.sync()
+        self.statusBar().showMessage(
+            "Automatic update checks enabled." if enabled else "Automatic update checks disabled.",
+            5000,
+        )
+
+    def _check_for_updates(self, *, automatic: bool = False) -> None:
+        if self._update_check_worker is not None:
+            return
+        build_info = load_installation_build_info()
+        if build_info is None:
+            if not automatic:
+                QMessageBox.information(
+                    self,
+                    "Software Updates",
+                    "Update checks are available in the installed Windows x64 portable build. "
+                    "A source checkout cannot replace itself.",
+                )
+            return
+
+        self.check_updates_action.setEnabled(False)
+        self.statusBar().showMessage("Checking for a newer published PFA release…")
+        worker = _StudyWorker(
+            lambda: discover_latest_release(build_info["version"])
+        )
+        worker.signals.succeeded.connect(
+            lambda release: self._update_check_completed(
+                release,
+                automatic,
+                build_info["version"],
+            )
+        )
+        worker.signals.failed.connect(
+            lambda detail: self._update_check_failed(detail, automatic)
+        )
+        self._update_check_worker = worker
+        self._thread_pool.start(worker)
+
+    def _update_check_completed(
+        self,
+        release: ReleaseUpdate | None,
+        automatic: bool,
+        installed_version: str,
+    ) -> None:
+        self._update_check_worker = None
+        self.check_updates_action.setEnabled(True)
+        if release is None:
+            self.statusBar().showMessage("PFA is up to date with the latest published release.", 7000)
+            if not automatic:
+                QMessageBox.information(
+                    self,
+                    "Software Updates",
+                    "No newer complete Windows x64 release is available. "
+                    "Only published GitHub Releases are considered; workflow artifacts are not "
+                    "treated as public product versions.",
+                )
+            return
+
+        notes = release.body.strip()
+        if len(notes) > 1400:
+            notes = notes[:1400].rstrip() + "…"
+        details = (
+            f"A newer POWER_FAULT_ANALYZER version is available.\n\n"
+            f"Installed: {installed_version}\n"
+            f"Available: {release.tag_name}\n\n"
+            f"{notes or 'No release notes were provided.'}\n\n"
+            "The portable application will be updated in place. Your project files and "
+            "preferences are stored separately. The previous application folder will be "
+            "retained as a rollback backup."
+        )
+        answer = QMessageBox.question(
+            self,
+            "PFA Update Available",
+            details,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._start_update_download(release)
+
+    def _update_check_failed(self, detail: str, automatic: bool) -> None:
+        self._update_check_worker = None
+        self.check_updates_action.setEnabled(True)
+        self.statusBar().showMessage("Could not check for PFA updates.", 7000)
+        if not automatic:
+            QMessageBox.warning(
+                self,
+                "Update Check Failed",
+                f"GitHub could not be reached or returned invalid release metadata.\n\n{detail}",
+            )
+
+    def _start_update_download(self, release: ReleaseUpdate) -> None:
+        if self._dirty and not self._save_project():
+            QMessageBox.information(
+                self,
+                "PFA Update",
+                "The update was cancelled because the current project could not be saved.",
+            )
+            return
+
+        self._update_progress = QProgressDialog(
+            f"Downloading POWER_FAULT_ANALYZER {release.tag_name}…", "", 0, 100, self
+        )
+        self._update_progress.setWindowTitle("PFA Update")
+        self._update_progress.setCancelButton(None)
+        self._update_progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self._update_progress.setMinimumDuration(0)
+        self._update_progress.setAutoClose(False)
+        self._update_progress.setAutoReset(False)
+        self._update_progress.setValue(0)
+        self._update_progress.show()
+
+        worker = _UpdateDownloadWorker(release)
+        worker.signals.progress.connect(self._update_download_progress)
+        worker.signals.completed.connect(self._update_download_completed)
+        worker.signals.failed.connect(self._update_download_failed)
+        self._update_download_worker = worker
+        self._thread_pool.start(worker)
+
+    def _update_download_progress(self, value: int) -> None:
+        if self._update_progress is not None:
+            self._update_progress.setValue(value)
+
+    def _update_download_completed(self, bundle) -> None:
+        self._update_download_worker = None
+        if self._update_progress is not None:
+            self._update_progress.close()
+            self._update_progress = None
+        self._launch_portable_update(bundle)
+
+    def _update_download_failed(self, detail: str) -> None:
+        self._update_download_worker = None
+        if self._update_progress is not None:
+            self._update_progress.close()
+            self._update_progress = None
+        QMessageBox.critical(
+            self,
+            "PFA Update Failed",
+            f"The update package could not be downloaded or verified. "
+            f"The installed application has not been changed.\n\n{detail}",
+        )
+
+    def _launch_portable_update(self, bundle) -> None:
+        install_directory = Path(sys.executable).resolve().parent
+        executable = install_directory / "POWER_FAULT_ANALYZER.exe"
+        powershell = (
+            Path(os.environ.get("SystemRoot", r"C:\Windows"))
+            / "System32"
+            / "WindowsPowerShell"
+            / "v1.0"
+            / "powershell.exe"
+        )
+        if not executable.is_file() or not powershell.is_file():
+            shutil.rmtree(bundle.directory, ignore_errors=True)
+            QMessageBox.critical(
+                self,
+                "PFA Update",
+                "The portable installation or Windows PowerShell could not be located. "
+                "The current version was not changed.",
+            )
+            return
+
+        arguments = [
+            str(powershell),
+            "-NoLogo",
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(bundle.updater_script),
+            "-ZipPath",
+            str(bundle.archive),
+            "-ChecksumPath",
+            str(bundle.checksum_manifest),
+            "-InstallDirectory",
+            str(install_directory),
+            "-WaitForProcessId",
+            str(os.getpid()),
+            "-Restart",
+            "-CleanupDirectory",
+            str(bundle.directory),
+        ]
+        startup_info = subprocess.STARTUPINFO()
+        startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup_info.wShowWindow = subprocess.SW_HIDE
+        creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        try:
+            subprocess.Popen(
+                arguments,
+                cwd=str(install_directory),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                startupinfo=startup_info,
+                creationflags=creation_flags,
+            )
+        except OSError as exc:
+            shutil.rmtree(bundle.directory, ignore_errors=True)
+            QMessageBox.critical(
+                self,
+                "PFA Update",
+                f"Could not start the portable updater. The current version was not changed.\n\n{exc}",
+            )
+            return
+
+        self.statusBar().showMessage(
+            "Update prepared. Closing PFA so the verified replacement can be applied…"
+        )
+        QTimer.singleShot(350, self.close)
 
     def _about(self) -> None:
         QMessageBox.information(
@@ -3061,6 +3722,167 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
             "Electrical calculations are executed by the existing numerical engine. "
             "The graphical diagram is presentation metadata; network topology is held by the domain aggregate.",
         )
+
+
+_LIGHT_WORKBENCH_STYLESHEET = """
+QMainWindow, QWidget { color: #1D2939; font-family: "Segoe UI"; font-size: 9pt; }
+QMainWindow { background: #F3F5F8; }
+QMenuBar { background: #FFFFFF; color: #344054; border-bottom: 1px solid #E4E7EC; padding: 1px 6px; min-height: 24px; }
+QMenuBar::item { padding: 4px 8px; background: transparent; }
+QMenuBar::item:selected { background: #EEF4F8; border-radius: 4px; }
+QMenu { background: #FFFFFF; color: #1D2939; border: 1px solid #D0D5DD; padding: 5px; }
+QMenu::item { padding: 7px 28px 7px 22px; }
+QMenu::item:selected { background: #EAF2F8; color: #173A57; }
+QToolBar#EngineeringCommandBar { background: #FFFFFF; border: 0; border-bottom: 1px solid #DCE3EA; spacing: 3px; padding: 2px 5px; min-height: 32px; }
+QToolButton { color: #344054; border: 1px solid transparent; border-radius: 4px; padding: 4px 6px; min-height: 22px; }
+QToolButton:hover { background: #F2F6FA; border-color: #D0DCE7; }
+QToolBar::separator { background: #E4E7EC; width: 1px; margin: 4px 8px; }
+QTreeWidget, QPlainTextEdit { background: #FFFFFF; color: #1D2939; border: 1px solid #E4E7EC; selection-background-color: #DCEAF4; selection-color: #173A57; alternate-background-color: #F8FAFC; }
+QTreeWidget { outline: 0; border: 0; }
+QTreeWidget::item { padding: 5px 4px; border: 0; }
+QTreeWidget::item:hover { background: #F5F8FA; }
+QTreeWidget::item:selected { background: #E6F0F6; color: #173A57; }
+QTabWidget::pane { background: #FFFFFF; border: 1px solid #E1E6EC; top: -1px; }
+QTabBar::tab { background: #F3F5F8; color: #667085; padding: 6px 11px; margin-right: 1px; border: 0; border-bottom: 2px solid transparent; }
+QTabBar::tab:selected { background: #FFFFFF; color: #173A57; border-bottom: 2px solid #1D6A83; font-weight: 600; }
+QTabBar::tab:hover:!selected { background: #EAF0F5; color: #344054; }
+QPushButton { background: #FFFFFF; color: #344054; border: 1px solid #D0D5DD; border-radius: 5px; padding: 8px 11px; }
+QPushButton:hover { background: #F7FAFC; border-color: #9FB3C4; }
+QPushButton:pressed { background: #EAF2F8; }
+QPushButton#PrimaryAction { background: #173A57; color: #FFFFFF; border: 1px solid #173A57; font-weight: 600; }
+QPushButton#PrimaryAction:hover { background: #24516F; border-color: #24516F; }
+QPushButton#SecondaryAction { color: #173A57; border-color: #B7C9D6; }
+QPushButton#EquipmentTile { background: #FFFFFF; border: 1px solid #DCE3E9; border-radius: 7px; color: #344054; font-weight: 600; padding: 12px; text-align: left; }
+QPushButton#EquipmentTile:hover { background: #F3F8FB; border-color: #91AFC1; color: #173A57; }
+QLineEdit, QDoubleSpinBox, QComboBox { background: #FFFFFF; color: #1D2939; border: 1px solid #D0D5DD; border-radius: 4px; padding: 5px 7px; min-height: 18px; selection-background-color: #DCEAF4; }
+QLineEdit:focus, QDoubleSpinBox:focus, QComboBox:focus { border: 1px solid #4D829D; }
+QHeaderView::section { background: #F5F7FA; color: #475467; padding: 8px; border: 0; border-bottom: 1px solid #E4E7EC; font-weight: 600; }
+QStatusBar { background: #FFFFFF; color: #667085; border-top: 1px solid #E4E7EC; min-height: 19px; padding: 0 4px; }
+QDockWidget { background: #FFFFFF; color: #344054; }
+QDockWidget > QWidget { background: #FFFFFF; }
+QWidget[workbenchPanelContent="true"] { background: #FFFFFF; }
+QWidget#NetworkDesignPage { background: #F3F5F8; }
+QTabWidget#MainWorkspaceTabs::pane { background: #F3F5F8; border: 0; }
+QFrame[workbenchPanel="true"] { background: #FFFFFF; border: 1px solid #E4E7EC; }
+QFrame#DiagramDocumentBar { background: #FFFFFF; border: 0; border-bottom: 1px solid #E4E7EC; }
+QLabel#DiagramEyebrow { color: #667085; font-size: 7pt; font-weight: 700; letter-spacing: 1.15px; }
+QLabel#DiagramTitle { color: #172B3A; font-size: 11pt; font-weight: 650; }
+QLabel#DiagramSummary { color: #667085; font-size: 7.5pt; font-weight: 600; }
+QToolButton#DiagramToggle { background: #F8FAFC; color: #475467; border: 1px solid #DCE3E9; border-radius: 5px; padding: 6px 11px; }
+QToolButton#DiagramToggle:checked { background: #E7F1F5; color: #15546A; border-color: #9BBBC8; font-weight: 600; }
+QPushButton#DiagramFitButton { padding: 6px 14px; background: #173A57; color: white; border-color: #173A57; font-weight: 600; }
+QLineEdit#ProjectTreeSearch { background: #F8FAFC; }
+QLabel#WorkbenchPanelHeading { color: #475467; font-size: 8pt; font-weight: 700; letter-spacing: 1px; padding: 3px 2px 7px 2px; }
+QLabel#SectionEyebrow { color: #667085; font-size: 8pt; font-weight: 700; letter-spacing: 1px; }
+QLabel#CanvasWelcomeEyebrow { color: #1D6A83; font-size: 8pt; font-weight: 700; letter-spacing: 1.2px; }
+QLabel#CanvasWelcomeTitle { color: #172B3A; font-size: 20pt; font-weight: 600; }
+QLabel#CanvasWelcomeDescription { color: #667085; font-size: 10pt; }
+QLabel#CanvasWelcomeHint { color: #98A2B3; font-size: 8pt; }
+QFrame#CanvasWelcomeCard { background: #FFFFFF; border: 1px solid #DCE3E9; border-radius: 12px; }
+QWidget#InspectorEmptyContainer { background: transparent; }
+QFrame#InspectorOverviewCard { background: #FFFFFF; border: 1px solid #DCE3E9; border-radius: 7px; }
+QLabel#InspectorOverviewEyebrow { color: #1D6A83; font-size: 7.5pt; font-weight: 700; letter-spacing: 0.8px; }
+QLabel#InspectorOverviewTitle { color: #172B3A; font-size: 12pt; font-weight: 650; }
+QLabel#InspectorOverviewMeta { color: #667085; font-size: 8pt; }
+QFrame#InspectorMetricCard { background: #F8FAFC; border: 1px solid #E4E7EC; border-radius: 5px; }
+QLabel#InspectorMetricCaption { color: #667085; font-size: 7pt; font-weight: 700; }
+QLabel#InspectorMetricValue { color: #173A57; font-size: 15pt; font-weight: 700; }
+QFrame#InspectorEmptyState { background: #F8FAFC; border: 1px dashed #D0D5DD; border-radius: 8px; }
+QToolButton#DiagramZoomButton { background: #F8FAFC; color: #344054; border: 1px solid #DCE3E9; border-radius: 5px; padding: 4px 10px; min-width: 22px; font-size: 12pt; font-weight: 700; }
+QToolButton#DiagramZoomButton:hover { background: #EAF2F8; border-color: #9FB3C4; }
+QLabel#InspectorEmptyEyebrow { color: #1D6A83; font-size: 8pt; font-weight: 700; }
+QLabel#InspectorEmptyTitle { color: #172B3A; font-size: 12pt; font-weight: 650; }
+QLabel#InspectorEmptyDescription { color: #667085; font-size: 9pt; }
+QFrame#SymbolPreviewFrame { background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 6px; }
+QLabel#CandidateStatus { background: #FFF7E8; color: #946200; border: 1px solid #F3D49A; border-radius: 4px; padding: 4px 6px; font-size: 7pt; font-weight: 700; }
+QLabel#QETProvenanceDetails { background: #F8FAFC; color: #475467; border: 1px solid #EAECF0; border-radius: 5px; padding: 8px; font-size: 8pt; }
+QLabel#QETLibraryStatus { color: #98A2B3; font-size: 8pt; }
+QToolButton#ProvenanceToggle { color: #475467; text-align: left; padding: 4px 2px; }
+QSplitter::handle { background: #E5EAF0; }
+QSplitter::handle:hover { background: #8AA5B7; }
+QSplitter::handle:horizontal { width: 9px; margin: 0 1px; }
+QSplitter::handle:vertical { height: 8px; margin: 1px 0; }
+"""
+
+_DARK_WORKBENCH_STYLESHEET = """
+QMainWindow, QWidget { color: #E5EDF4; font-family: "Segoe UI"; font-size: 9pt; }
+QMainWindow { background: #111922; }
+QMenuBar { background: #192431; color: #E5EDF4; border-bottom: 1px solid #354556; padding: 1px 6px; min-height: 24px; }
+QMenuBar::item { padding: 4px 8px; background: transparent; }
+QMenuBar::item:selected { background: #304254; border-radius: 4px; }
+QMenu { background: #202E3C; color: #E5EDF4; border: 1px solid #354556; padding: 4px; }
+QMenu::item { padding: 6px 26px 6px 20px; }
+QMenu::item:selected { background: #244B60; color: #F5FAFC; }
+QToolBar#EngineeringCommandBar { background: #192431; border: 0; border-bottom: 1px solid #354556; spacing: 3px; padding: 2px 5px; min-height: 32px; }
+QToolButton { background: transparent; color: #E5EDF4; border: 1px solid transparent; border-radius: 4px; padding: 4px 6px; min-height: 22px; }
+QToolButton:hover { background: #304254; border-color: #4A5D70; }
+QToolButton:pressed, QToolButton:checked { background: #244B60; border-color: #29B6D1; }
+QToolBar::separator { background: #354556; width: 1px; margin: 4px 6px; }
+QDockWidget { background: #192431; color: #E5EDF4; }
+QDockWidget > QWidget { background: #192431; }
+QDockWidget::title { background: #202E3C; color: #E5EDF4; padding: 6px 9px; border-bottom: 1px solid #354556; font-weight: 600; }
+QWidget[workbenchPanelContent="true"] { background: #192431; }
+QWidget#NetworkDesignPage { background: #111922; }
+QTabWidget#MainWorkspaceTabs::pane { background: #111922; border: 0; }
+QTreeWidget, QPlainTextEdit { background: #111B26; color: #E5EDF4; border: 1px solid #354556; selection-background-color: #244B60; selection-color: #F5FAFC; alternate-background-color: #202E3C; }
+QTreeWidget { outline: 0; border: 0; }
+QTreeWidget::item { padding: 5px 4px; border: 0; }
+QTreeWidget::item:hover { background: #304254; }
+QTreeWidget::item:selected { background: #244B60; color: #F5FAFC; }
+QTabWidget::pane { background: #192431; border: 1px solid #354556; top: -1px; }
+QTabBar::tab { background: #202E3C; color: #A5B4C3; padding: 6px 11px; margin-right: 1px; border: 0; border-bottom: 2px solid transparent; }
+QTabBar::tab:selected { background: #192431; color: #E5EDF4; border-bottom: 2px solid #29B6D1; font-weight: 600; }
+QTabBar::tab:hover:!selected { background: #304254; color: #E5EDF4; }
+QPushButton { background: #202E3C; color: #E5EDF4; border: 1px solid #4A5D70; border-radius: 4px; padding: 6px 9px; }
+QPushButton:hover { background: #304254; border-color: #29B6D1; }
+QPushButton:pressed { background: #244B60; }
+QPushButton#PrimaryAction { background: #1D657C; color: #FFFFFF; border: 1px solid #1D657C; font-weight: 600; }
+QPushButton#PrimaryAction:hover { background: #247F9A; border-color: #247F9A; }
+QPushButton#SecondaryAction { color: #B9EAF2; border-color: #4A5D70; }
+QPushButton#EquipmentTile { background: #202E3C; border: 1px solid #354556; border-radius: 6px; color: #E5EDF4; font-weight: 600; padding: 9px; text-align: left; }
+QPushButton#EquipmentTile:hover { background: #304254; border-color: #29B6D1; color: #FFFFFF; }
+QLineEdit, QDoubleSpinBox, QComboBox { background: #111B26; color: #E5EDF4; border: 1px solid #485B6F; border-radius: 4px; padding: 5px 7px; min-height: 18px; selection-background-color: #244B60; }
+QLineEdit:focus, QDoubleSpinBox:focus, QComboBox:focus { border: 1px solid #29B6D1; }
+QHeaderView::section { background: #202E3C; color: #A5B4C3; padding: 6px; border: 0; border-bottom: 1px solid #354556; font-weight: 600; }
+QStatusBar { background: #192431; color: #A5B4C3; border-top: 1px solid #354556; min-height: 19px; padding: 0 4px; }
+QFrame[workbenchPanel="true"] { background: #192431; border: 1px solid #354556; }
+QFrame#DiagramDocumentBar { background: #192431; border: 0; border-bottom: 1px solid #354556; }
+QLabel#DiagramEyebrow, QLabel#DiagramSummary { color: #A5B4C3; }
+QLabel#DiagramTitle { color: #F5FAFC; font-size: 11pt; font-weight: 650; }
+QToolButton#DiagramToggle { background: #202E3C; color: #E5EDF4; border: 1px solid #4A5D70; border-radius: 4px; padding: 4px 8px; }
+QToolButton#DiagramToggle:checked { background: #244B60; color: #FFFFFF; border-color: #29B6D1; font-weight: 600; }
+QPushButton#DiagramFitButton { padding: 5px 11px; background: #1D657C; color: white; border-color: #1D657C; font-weight: 600; }
+QLineEdit#ProjectTreeSearch { background: #111B26; }
+QLabel#WorkbenchPanelHeading { color: #A5B4C3; font-size: 8pt; font-weight: 700; letter-spacing: 1px; padding: 3px 2px 6px 2px; }
+QLabel#SectionEyebrow { color: #A5B4C3; font-size: 8pt; font-weight: 700; letter-spacing: 1px; }
+QLabel#CanvasWelcomeEyebrow { color: #29B6D1; font-size: 8pt; font-weight: 700; letter-spacing: 1.2px; }
+QLabel#CanvasWelcomeTitle { color: #F5FAFC; font-size: 20pt; font-weight: 600; }
+QLabel#CanvasWelcomeDescription { color: #A5B4C3; font-size: 10pt; }
+QLabel#CanvasWelcomeHint { color: #A5B4C3; font-size: 8pt; }
+QFrame#CanvasWelcomeCard, QFrame#SymbolPreviewFrame { background: #202E3C; border: 1px solid #354556; border-radius: 8px; }
+QWidget#InspectorEmptyContainer { background: transparent; }
+QFrame#InspectorOverviewCard { background: #192431; border: 1px solid #354556; border-radius: 6px; }
+QLabel#InspectorOverviewEyebrow { color: #29B6D1; font-size: 7.5pt; font-weight: 700; letter-spacing: 0.8px; }
+QLabel#InspectorOverviewTitle { color: #F5FAFC; font-size: 12pt; font-weight: 650; }
+QLabel#InspectorOverviewMeta { color: #A5B4C3; font-size: 8pt; }
+QFrame#InspectorMetricCard { background: #202E3C; border: 1px solid #354556; border-radius: 5px; }
+QLabel#InspectorMetricCaption { color: #A5B4C3; font-size: 7pt; font-weight: 700; }
+QLabel#InspectorMetricValue { color: #F5FAFC; font-size: 15pt; font-weight: 700; }
+QFrame#InspectorEmptyState { background: #202E3C; border: 1px dashed #4A5D70; border-radius: 8px; }
+QToolButton#DiagramZoomButton { background: #202E3C; color: #E5EDF4; border: 1px solid #4A5D70; border-radius: 4px; padding: 3px 9px; min-width: 22px; font-size: 12pt; font-weight: 700; }
+QToolButton#DiagramZoomButton:hover { background: #304254; border-color: #29B6D1; }
+QLabel#InspectorEmptyEyebrow { color: #29B6D1; font-size: 8pt; font-weight: 700; }
+QLabel#InspectorEmptyTitle { color: #F5FAFC; font-size: 12pt; font-weight: 650; }
+QLabel#InspectorEmptyDescription { color: #A5B4C3; font-size: 9pt; }
+QLabel#CandidateStatus { background: #3B3020; color: #F0C36D; border: 1px solid #7D6436; border-radius: 4px; padding: 4px 6px; font-size: 7pt; font-weight: 700; }
+QLabel#QETProvenanceDetails { background: #111B26; color: #A5B4C3; border: 1px solid #354556; border-radius: 5px; padding: 8px; font-size: 8pt; }
+QLabel#QETLibraryStatus { color: #A5B4C3; font-size: 8pt; }
+QToolButton#ProvenanceToggle { color: #A5B4C3; text-align: left; padding: 4px 2px; }
+QSplitter::handle { background: #354556; }
+QSplitter::handle:hover { background: #29B6D1; }
+QSplitter::handle:horizontal { width: 9px; margin: 0 1px; }
+QSplitter::handle:vertical { height: 7px; margin: 1px 0; }
+"""
 
 
 def _sequence_value(value) -> str:

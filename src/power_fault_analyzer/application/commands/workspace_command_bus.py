@@ -10,23 +10,12 @@ from __future__ import annotations
 
 import copy
 import logging
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 from threading import RLock
-from typing import Callable, Iterable
 from uuid import UUID, uuid4
 
-from power_fault_analyzer.domain.aggregates.network import Network
-from power_fault_analyzer.application.use_cases.network_workspace import (
-    DiagramLabelPlacement,
-    DiagramSymbolPlacement,
-    NetworkWorkspace,
-)
-from power_fault_analyzer.application.use_cases.network_editing import (
-    LineInput,
-    SynchronousGeneratorInput,
-)
-from power_fault_analyzer.domain.interfaces.network_contracts import ElectricalEquipment
 from power_fault_analyzer.application.commands.workspace_commands import (
     AddBus,
     AddSynchronousGenerator,
@@ -34,23 +23,44 @@ from power_fault_analyzer.application.commands.workspace_commands import (
     AddTransmissionLine,
     MoveDiagramElements,
     MoveDiagramSymbol,
+    RegisterEquipment,
     RemoveBus,
     RemoveDiagramLabel,
     RemoveDiagramPosition,
     RemoveDiagramRotation,
     RemoveDiagramSymbol,
-    RegisterEquipment,
     RemoveEquipment,
+    RemoveOperatingScenario,
     RotateBusbar,
+    SetActiveOperatingScenario,
     SetDiagramGrid,
     SetEquipmentSwitchPosition,
+    SetOperatingScenarioSwitchPosition,
     UpdateBus,
     UpsertDiagramLabel,
     UpsertDiagramSymbol,
+    UpsertOperatingScenario,
     WorkspaceCommand,
 )
+from power_fault_analyzer.application.use_cases.network_editing import (
+    LineInput,
+    SynchronousGeneratorInput,
+)
+from power_fault_analyzer.application.use_cases.network_workspace import (
+    DiagramLabelPlacement,
+    DiagramSymbolPlacement,
+    NetworkWorkspace,
+)
+from power_fault_analyzer.domain.aggregates.network import Network
 from power_fault_analyzer.domain.enums.bus_kind import BusKind
 from power_fault_analyzer.domain.enums.switching_device import SwitchPosition
+from power_fault_analyzer.domain.interfaces.network_contracts import ElectricalEquipment
+from power_fault_analyzer.operations.models import (
+    OperatingScenario,
+)
+from power_fault_analyzer.operations.models import (
+    SwitchPosition as OperatingSwitchPosition,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -156,7 +166,7 @@ class WorkspaceCommandBus:
         for listener in listeners:
             try:
                 listener(event)
-            except Exception:  # noqa: BLE001 - event subscribers are isolation boundaries.
+            except Exception:
                 _LOGGER.exception("Workspace command event listener failed.")
         return results
 
@@ -238,7 +248,24 @@ class NetworkWorkspaceCommands:
     def remove_symbol(self, instance_id: UUID) -> DiagramSymbolPlacement:
         return self.bus.execute(RemoveDiagramSymbol(instance_id))
 
+    def upsert_operating_scenario(self, scenario: OperatingScenario) -> OperatingScenario | None:
+        return self.bus.execute(UpsertOperatingScenario(scenario))
+
+    def remove_operating_scenario(self, scenario_id: UUID) -> OperatingScenario:
+        return self.bus.execute(RemoveOperatingScenario(scenario_id))
+
+    def set_active_operating_scenario(self, scenario_id: UUID | None) -> UUID | None:
+        return self.bus.execute(SetActiveOperatingScenario(scenario_id))
+
+    def set_operating_switch_position(
+        self, scenario_id: UUID, equipment_id: UUID, position: OperatingSwitchPosition
+    ) -> OperatingScenario:
+        return self.bus.execute(
+            SetOperatingScenarioSwitchPosition(scenario_id, equipment_id, position)
+        )
+
     def set_switch_position(self, equipment_id: UUID, position: SwitchPosition):
+        """Change the physical model state; use set_operating_switch_position for simulation."""
         return self.bus.execute(SetEquipmentSwitchPosition(equipment_id, position))
 
     def upsert_label(self, label: DiagramLabelPlacement) -> DiagramLabelPlacement:

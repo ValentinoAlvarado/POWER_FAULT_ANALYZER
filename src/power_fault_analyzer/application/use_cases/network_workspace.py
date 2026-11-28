@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 from power_fault_analyzer.domain.aggregates.network import Network
 from power_fault_analyzer.domain.value_objects.short_circuit_result import ShortCircuitResult
+from power_fault_analyzer.operations.models import OperatingScenario
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,7 +143,7 @@ class DiagramLabelPlacement:
     y: float
     anchor: str = "middle"
     font_family: str = "Segoe UI"
-    size_pt: float = 9.0
+    size_pt: float = 7.5
     weight: str = "normal"
     color: str = "#172033"
     rotation_deg: float = 0.0
@@ -197,11 +198,11 @@ class DiagramLabelPlacement:
     def create(
         cls, text: str, x: float, y: float, *, owner_id: UUID | None = None,
         anchor: str = "middle", font_family: str = "Segoe UI",
-        size_pt: float = 9.0, weight: str = "normal", color: str = "#172033",
+        size_pt: float = 7.5, weight: str = "normal", color: str = "#172033",
         rotation_deg: float = 0.0, visible: bool = True,
         layer: str = "annotations", priority: int = 50,
         unit: str | None = None, number_format: str | None = None,
-    ) -> "DiagramLabelPlacement":
+    ) -> DiagramLabelPlacement:
         return cls(
             label_id=uuid4(), owner_id=owner_id, text=text, x=x, y=y, anchor=anchor,
             font_family=font_family, size_pt=size_pt, weight=weight, color=color,
@@ -226,6 +227,9 @@ class NetworkWorkspace:
     study_history: tuple[NetworkStudyRecord, ...] = ()
     diagram_symbols: dict[UUID, DiagramSymbolPlacement] = field(default_factory=dict)
     diagram_labels: dict[UUID, DiagramLabelPlacement] = field(default_factory=dict)
+    # Appended after the original workspace fields to preserve positional callers.
+    operating_scenarios: dict[UUID, OperatingScenario] = field(default_factory=dict)
+    active_operating_scenario_id: UUID | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.network, Network):
@@ -320,6 +324,41 @@ class NetworkWorkspace:
         identifiers = tuple(item.run_id for item in self.study_history)
         if len(identifiers) != len(set(identifiers)):
             raise ValueError("Network study run identifiers must be unique.")
+        if not isinstance(self.operating_scenarios, dict):
+            raise TypeError("operating_scenarios must be a dictionary keyed by scenario UUID.")
+        equipment_by_id = {item.id: item for item in self.network.equipment}
+        switch_ids = {
+            identifier for identifier, item in equipment_by_id.items()
+            if hasattr(item, "device_kind") and hasattr(item, "position")
+        }
+        normalized_scenarios: dict[UUID, OperatingScenario] = {}
+        for identifier, scenario in self.operating_scenarios.items():
+            if not isinstance(identifier, UUID) or not isinstance(scenario, OperatingScenario):
+                raise TypeError("Operating scenarios must be keyed by UUID and contain OperatingScenario values.")
+            if identifier != scenario.scenario_id:
+                raise ValueError("Operating scenario dictionary key must match scenario.scenario_id.")
+            unknown_switches = set(scenario.switch_positions) - switch_ids
+            unknown_equipment = (
+                set(scenario.equipment_in_service) | set(scenario.source_enabled)
+            ) - set(equipment_by_id)
+            if unknown_switches:
+                raise ValueError(f"Operating scenario references unknown/non-switch equipment: {sorted(map(str, unknown_switches))}.")
+            if unknown_equipment:
+                raise ValueError(f"Operating scenario references unknown equipment: {sorted(map(str, unknown_equipment))}.")
+            normalized_scenarios[identifier] = scenario
+        self.operating_scenarios = normalized_scenarios
+        if self.active_operating_scenario_id is not None:
+            if not isinstance(self.active_operating_scenario_id, UUID):
+                raise TypeError("active_operating_scenario_id must be a UUID or None.")
+            if self.active_operating_scenario_id not in normalized_scenarios:
+                raise ValueError("active_operating_scenario_id references an unknown scenario.")
+
+    @property
+    def active_operating_scenario(self) -> OperatingScenario | None:
+        """Return the selected operational overlay without changing the physical network."""
+        if self.active_operating_scenario_id is None:
+            return None
+        return self.operating_scenarios[self.active_operating_scenario_id]
 
     def update_diagram_rotation(self, bus_id: UUID, rotation_deg: float) -> float:
         """Update a busbar's drawing orientation without changing electrical topology."""

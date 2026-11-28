@@ -121,7 +121,7 @@ try {
     New-Item -ItemType Directory -Path $startupRoot | Out-Null
     New-TestInstall -Directory $startupInstall -Version 'old-startup-failure-test'
     $startupStatusPath = Join-Path $startupRoot 'updater.status'
-    function global:Start-Process {
+    function Start-Process {
         [CmdletBinding()]
         param(
             [string]$FilePath,
@@ -147,6 +147,10 @@ try {
     }
     if (-not $startupFailureObserved) {
         throw 'An application startup failure did not fail the update transaction.'
+    }
+    $nativeStartProcess = Get-Command Start-Process -CommandType Cmdlet -ErrorAction SilentlyContinue
+    if (-not $nativeStartProcess) {
+        throw 'The startup-failure test double leaked into the successful restart test; native Start-Process was not restored.'
     }
     $startupRestoredInfo = Get-Content -LiteralPath (Join-Path $startupInstall 'BUILD-INFO.json') -Raw | ConvertFrom-Json
     if ($startupRestoredInfo.version -ne 'old-startup-failure-test') {

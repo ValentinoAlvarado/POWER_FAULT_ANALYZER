@@ -143,7 +143,7 @@ try {
         }
     }
     finally {
-        Remove-Item Function:\global:Start-Process -ErrorAction SilentlyContinue
+        Remove-Item Function:\Start-Process -ErrorAction SilentlyContinue
     }
     if (-not $startupFailureObserved) {
         throw 'An application startup failure did not fail the update transaction.'

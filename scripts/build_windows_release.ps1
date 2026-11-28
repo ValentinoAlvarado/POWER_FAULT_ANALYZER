@@ -111,13 +111,14 @@ foreach ($generated in @($appFolder, $workPath, $specPath)) {
     }
 }
 
+# Keep PyInstaller's standard PySide6 hooks rather than collecting the entire package.
+# The previous blanket collection bundled the unused Qt WebEngine runtime, including
+# Chromium and DevTools resources. Explicit exclusions and the post-build audit below
+# prevent that payload from silently returning.
 Invoke-Checked 'Build standalone Windows x64 desktop application' {
     & $Python -m PyInstaller --noconfirm --clean --windowed --onedir `
         --name POWER_FAULT_ANALYZER `
         --paths src `
-        # PyInstaller's PySide6 hooks collect only Qt modules reached by imports.
-        # The blanket --collect-all PySide6 previously bundled the unused Qt WebEngine
-        # runtime (including Chromium/DevTools resources), adding hundreds of MB.
         --exclude-module PySide6.QtWebEngineCore `
         --exclude-module PySide6.QtWebEngineWidgets `
         --exclude-module PySide6.QtWebEngineQuick `

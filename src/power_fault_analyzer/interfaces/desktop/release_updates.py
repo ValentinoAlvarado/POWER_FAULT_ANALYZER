@@ -14,7 +14,7 @@ import shutil
 import sys
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -41,6 +41,7 @@ class ReleaseUpdate:
     published_at: str
     body: str
     asset_urls: dict[str, str]
+    asset_api_urls: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +116,7 @@ def _release_from_payload(
 
     trusted_asset_prefix = f"/{repository}/releases/download/"
     assets: dict[str, str] = {}
+    asset_api_urls: dict[str, str] = {}
     for asset in payload.get("assets", ()):
         name = str(asset.get("name", ""))
         url = str(asset.get("browser_download_url", ""))
@@ -129,6 +131,11 @@ def _release_from_payload(
         )
         if name in _REQUIRED_ASSETS and is_trusted_github_asset:
             assets[name] = url
+            asset_id = asset.get("id")
+            if isinstance(asset_id, int) and not isinstance(asset_id, bool) and asset_id > 0:
+                asset_api_urls[name] = (
+                    f"https://api.github.com/repos/{repository}/releases/assets/{asset_id}"
+                )
     if any(name not in assets for name in _REQUIRED_ASSETS):
         return None
 
@@ -140,6 +147,7 @@ def _release_from_payload(
         published_at=str(payload.get("published_at") or ""),
         body=str(payload.get("body") or ""),
         asset_urls=assets,
+        asset_api_urls=asset_api_urls,
     )
 
 
@@ -213,22 +221,58 @@ def _download_asset(
     progress: Callable[[int], None] | None,
     asset_index: int,
     asset_count: int,
+    api_url: str | None = None,
 ) -> None:
-    request = Request(
-        url,
-        headers={"User-Agent": "POWER-FAULT-ANALYZER-update", "Accept": "application/octet-stream"},
+    """Download an asset, preferring GitHub's asset API and falling back to its browser URL.
+
+    GitHub's release asset API is the canonical binary-download endpoint. The browser
+    URL remains a fallback for proxies/CDNs that return an empty API response.
+    Empty and truncated responses are rejected instead of being left as zero-byte files.
+    """
+    candidates = tuple(dict.fromkeys(candidate for candidate in (api_url, url) if candidate))
+    failures: list[str] = []
+    for candidate in candidates:
+        destination.unlink(missing_ok=True)
+        request = Request(
+            candidate,
+            headers={
+                "User-Agent": "POWER-FAULT-ANALYZER-update",
+                "Accept": "application/octet-stream",
+            },
+        )
+        try:
+            with opener(request, timeout=timeout) as response:
+                raw_length = getattr(response, "headers", {}).get("Content-Length")
+                total_length = (
+                    int(raw_length) if raw_length and raw_length.isdigit() else 0
+                )
+                downloaded = 0
+                with destination.open("wb") as output:
+                    while chunk := response.read(_DOWNLOAD_CHUNK_SIZE):
+                        output.write(chunk)
+                        downloaded += len(chunk)
+                        if progress:
+                            fraction = downloaded / total_length if total_length else 0.0
+                            percent = int(
+                                ((asset_index + min(fraction, 1.0)) / asset_count) * 100
+                            )
+                            progress(min(percent, 99))
+            if downloaded == 0:
+                raise ValueError("GitHub returned an empty release asset.")
+            if total_length and downloaded != total_length:
+                raise ValueError(
+                    f"GitHub returned a truncated release asset "
+                    f"({downloaded} of {total_length} bytes)."
+                )
+            return
+        except Exception as exc:  # noqa: BLE001 - retry the alternate official URL.
+            failures.append(f"{candidate}: {exc}")
+            destination.unlink(missing_ok=True)
+
+    raise OSError(
+        "Could not download a complete, non-empty GitHub release asset. "
+        + " | ".join(failures)
     )
-    with opener(request, timeout=timeout) as response, destination.open("wb") as output:
-        raw_length = getattr(response, "headers", {}).get("Content-Length")
-        total_length = int(raw_length) if raw_length and raw_length.isdigit() else 0
-        downloaded = 0
-        while chunk := response.read(_DOWNLOAD_CHUNK_SIZE):
-            output.write(chunk)
-            downloaded += len(chunk)
-            if progress:
-                fraction = downloaded / total_length if total_length else 0.0
-                percent = int(((asset_index + min(fraction, 1.0)) / asset_count) * 100)
-                progress(min(percent, 99))
 
 
 def download_update_bundle(
@@ -276,6 +320,7 @@ def download_update_bundle(
                 progress=progress,
                 asset_index=index,
                 asset_count=len(targets),
+                api_url=release.asset_api_urls.get(name),
             )
 
         expected = _expected_hashes(checksum)

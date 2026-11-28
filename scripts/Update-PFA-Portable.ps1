@@ -1,3 +1,14 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string]$ZipPath,
+    [Parameter(Mandatory = $true)][string]$ChecksumPath,
+    [Parameter(Mandatory = $true)][string]$InstallDirectory,
+    [int]$WaitForProcessId = 0,
+    [switch]$Restart,
+    [string]$CleanupDirectory = '',
+    [string]$UserProjectsDirectory = ''
+)
+
 $ErrorActionPreference = 'Stop'
 $zip = (Resolve-Path -LiteralPath $ZipPath -ErrorAction Stop).Path
 $checksum = (Resolve-Path -LiteralPath $ChecksumPath -ErrorAction Stop).Path

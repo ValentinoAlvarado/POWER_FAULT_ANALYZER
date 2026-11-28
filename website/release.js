@@ -18,12 +18,12 @@
   fetch(`https://api.github.com/repos/${repository}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } })
     .then(response => { if (!response.ok) throw new Error(`No public release (${response.status})`); return response.json(); })
     .then(release => {
-      const asset = (release.assets || []).find(item => item.name === 'PFA-Windows-x64.zip');
-      if (!asset) throw new Error('The latest release does not contain PFA-Windows-x64.zip.');
+      const asset = (release.assets || []).find(item => item.name === 'PFA-Setup-x64.exe');
+      if (!asset) throw new Error('The latest release does not contain the Windows setup executable.');
       download.href = asset.browser_download_url;
       download.removeAttribute('aria-disabled');
-      download.textContent = `Download for Windows · ${release.tag_name}`;
-      note.textContent = `${release.name || release.tag_name} · ${new Date(release.published_at).toLocaleDateString()} · ZIP package`;
+      download.textContent = `Install for Windows · ${release.tag_name}`;
+      note.textContent = `${release.name || release.tag_name} · ${new Date(release.published_at).toLocaleDateString()} · Windows x64 setup · SHA-256 published with the release`;
     })
     .catch(error => {
       download.textContent = 'No verified release available';

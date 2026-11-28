@@ -186,8 +186,8 @@ $buildInfo = [ordered]@{
     git_commit = $gitCommit
     built_utc = [DateTime]::UtcNow.ToString('o')
     repository = 'https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER'
-    distribution = 'portable PyInstaller onedir ZIP; no installer executable is produced by this workflow'
-    artifacts = @('PFA-Windows-x64.zip', 'SHA256SUMS.txt', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json', 'Update-PFA-Portable.ps1')
+    distribution = 'Windows x64 PyInstaller onedir package with per-user NSIS installer; in-app updates replace the installed application in place'
+    artifacts = @('PFA-Setup-x64.exe', 'PFA-Windows-x64.zip', 'SHA256SUMS.txt', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json', 'Update-PFA-Portable.ps1')
 }
 $buildInfoPath = Join-Path $releaseDirectory 'BUILD-INFO.json'
 $buildInfo | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $buildInfoPath -Encoding UTF8
@@ -198,6 +198,78 @@ if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force 
 Compress-Archive -Path (Join-Path $appFolder '*') -DestinationPath $zipPath -CompressionLevel Optimal
 if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf) -or (Get-Item -LiteralPath $zipPath).Length -le 0) {
     throw 'Portable Windows ZIP was not created or is empty.'
+}
+
+# Build a per-user setup executable from the same verified onedir payload.
+# The portable ZIP remains the payload used by the in-app updater.
+$makensis = $env:PFA_MAKENSIS_PATH
+if ([string]::IsNullOrWhiteSpace($makensis) -or -not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+    $command = Get-Command makensis.exe -ErrorAction SilentlyContinue
+    if ($command) { $makensis = $command.Source }
+}
+if ([string]::IsNullOrWhiteSpace($makensis) -or -not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+    $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
+    $nsisCandidates = @(
+        (Join-Path $programFilesX86 'NSIS\makensis.exe'),
+        (Join-Path $env:ProgramFiles 'NSIS\makensis.exe')
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+    if ($nsisCandidates) { $makensis = $nsisCandidates[0] }
+}
+if ([string]::IsNullOrWhiteSpace($makensis) -or -not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+    throw 'NSIS makensis.exe is required to build PFA-Setup-x64.exe.'
+}
+
+$resourceMatch = [regex]::Match(
+    $displayVersion,
+    '^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:(?<pre>a|b|rc)(?<number>\d+))?
+foreach ($fileName in @('PFA-Setup-x64.exe', 'PFA-Windows-x64.zip', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json', 'Update-PFA-Portable.ps1')) {
+    $path = Join-Path $releaseDirectory $fileName
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release sidecar missing: $path" }
+    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hashLines += "$hash  $fileName"
+}
+$checksumPath = Join-Path $releaseDirectory 'SHA256SUMS.txt'
+$hashLines | Set-Content -LiteralPath $checksumPath -Encoding ASCII
+
+if (-not $SkipTests) {
+    Write-Host '== Portable updater success, checksum and rollback acceptance ==' -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot 'verify_portable_updater.ps1') `
+        -UpdaterScript $updater `
+        -ZipPath $zipPath `
+        -ChecksumPath $checksumPath
+}
+
+Write-Host "Portable Windows package: $zipPath" -ForegroundColor Green
+Write-Host "Release sidecars: $releaseDirectory" -ForegroundColor Green
+Write-Host "Windows installer: $setupPath" -ForegroundColor Green
+)
+if (-not $resourceMatch.Success) {
+    throw "Version '$displayVersion' cannot be represented in the Windows four-part file version."
+}
+$resourceRevision = 0
+if ($resourceMatch.Groups['number'].Success) {
+    $preNumber = [int]$resourceMatch.Groups['number'].Value
+    $resourceRevision = switch ($resourceMatch.Groups['pre'].Value) {
+        'a'  { 1000 + $preNumber }
+        'b'  { 20000 + $preNumber }
+        'rc' { 40000 + $preNumber }
+    }
+}
+if ($resourceRevision -gt 65535) { throw 'Pre-release sequence exceeds Windows file-version limits.' }
+$resourceVersion = '{0}.{1}.{2}.{3}' -f $resourceMatch.Groups['major'].Value, $resourceMatch.Groups['minor'].Value, $resourceMatch.Groups['patch'].Value, $resourceRevision
+$setupPath = Join-Path $releaseDirectory 'PFA-Setup-x64.exe'
+if (Test-Path -LiteralPath $setupPath) { Remove-Item -LiteralPath $setupPath -Force }
+$nsisArgs = @(
+    "/DAPP_VERSION=$displayVersion",
+    "/DAPP_VERSION_RESOURCE=$resourceVersion",
+    "/DAPP_SOURCE=$appFolder",
+    "/DOUTPUT_PATH=$setupPath"
+)
+Write-Host '== Build per-user Windows installer with NSIS ==' -ForegroundColor Cyan
+& $makensis @nsisArgs (Join-Path $RepositoryRoot 'installer/PFA-Setup-x64.nsi')
+if ($LASTEXITCODE -ne 0) { throw "NSIS installer build failed with exit code $LASTEXITCODE." }
+if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf) -or (Get-Item -LiteralPath $setupPath).Length -le 0) {
+    throw 'NSIS did not produce a non-empty PFA-Setup-x64.exe.'
 }
 
 $hashLines = @()

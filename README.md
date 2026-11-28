@@ -4,6 +4,20 @@
 
 An extensible platform for balanced three-phase power-system short-circuit studies. The project uses Python 3.13.x, object-oriented domain modeling, DDD, and hexagonal architecture. The desktop and web clients are planned to share the same application and electrical-domain core.
 
+## Get the Windows application
+
+For first-time installation, use the **Windows x64 setup executable** from the project's [GitHub Releases](https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/releases). The planned `PFA-Setup-x64.exe` is a per-user installer: it installs the desktop application under the current Windows user's profile and creates Start Menu and Desktop shortcuts. End users do not need PyCharm, Python or a source checkout.
+
+After installation, the application can check GitHub Releases at startup and through **Help → Check for Updates…**. When a newer complete release is available, PFA asks before downloading, verifies the update payload, preserves projects and preferences outside the application directory, replaces the installed application in place and restarts. The previous application folder is retained as a rollback copy.
+
+The `PFA-Windows-x64.zip` is the portable onedir package and the payload used for in-app updates. It is also available to users who prefer a portable folder instead of a setup wizard.
+
+A public download is activated only after a tagged release passes the Windows build, test, license-review and artifact-verification gates. Until then, the Releases page may contain no verified installer.
+
+## Source code and contributions
+
+The source repository is public under GPL-3.0-or-later. Anyone can inspect it, fork it, modify a feature, build a development version and submit improvements through a pull request. Installing the Windows application does not include the development toolchain; contributors who want to change PFA itself should follow the source environment and test instructions below.
+
 ## Current implementation
 
 Implemented foundations:

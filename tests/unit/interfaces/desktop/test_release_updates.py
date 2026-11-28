@@ -9,7 +9,6 @@ import pytest
 
 from power_fault_analyzer.interfaces.desktop import release_updates
 
-
 _REQUIRED = (
     "PFA-Windows-x64.zip",
     "SHA256SUMS.txt",

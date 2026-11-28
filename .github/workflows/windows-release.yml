@@ -37,6 +37,26 @@ jobs:
           # errors propagate directly; LASTEXITCODE is undefined/null here.
           ./scripts/Acquire-QElectroTechSymbolSeed.ps1
 
+      - name: Install NSIS compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
+          $candidates = @(
+            (Join-Path $programFilesX86 'NSIS\makensis.exe'),
+            (Join-Path $env:ProgramFiles 'NSIS\makensis.exe')
+          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+          if (-not $candidates) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "Chocolatey NSIS installation failed with exit code $LASTEXITCODE." }
+            $candidates = @(
+              (Join-Path $programFilesX86 'NSIS\makensis.exe'),
+              (Join-Path $env:ProgramFiles 'NSIS\makensis.exe')
+            ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+          }
+          if (-not $candidates) { throw 'NSIS installation completed but makensis.exe was not found.' }
+          "PFA_MAKENSIS_PATH=$($candidates[0])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Install Cairo native runtime
         uses: msys2/setup-msys2@v2
         id: cairo
@@ -78,6 +98,7 @@ jobs:
         shell: pwsh
         run: |
           $required = @(
+            "dist/release/PFA-Setup-x64.exe",
             "dist/release/PFA-Windows-x64.zip",
             "dist/release/SHA256SUMS.txt",
             "dist/release/SBOM.cdx.json",
@@ -105,6 +126,7 @@ jobs:
           name: POWER-FAULT-ANALYZER-Windows-${{ github.sha }}
           if-no-files-found: error
           path: |
+            dist/release/PFA-Setup-x64.exe
             dist/release/PFA-Windows-x64.zip
             dist/release/SHA256SUMS.txt
             dist/release/SBOM.cdx.json
@@ -150,6 +172,7 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
+            dist/release/PFA-Setup-x64.exe
             dist/release/PFA-Windows-x64.zip
             dist/release/SHA256SUMS.txt
             dist/release/Update-PFA-Portable.ps1

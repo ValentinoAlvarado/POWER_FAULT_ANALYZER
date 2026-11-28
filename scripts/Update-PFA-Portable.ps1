@@ -6,10 +6,32 @@ param(
     [int]$WaitForProcessId = 0,
     [switch]$Restart,
     [string]$CleanupDirectory = '',
-    [string]$UserProjectsDirectory = ''
+    [string]$UserProjectsDirectory = '',
+    [string]$StatusPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Set-PFAUpdaterStatus {
+    param([string]$State, [string]$Detail = '')
+    if ([string]::IsNullOrWhiteSpace($StatusPath)) {
+        return
+    }
+    $normalizedDetail = ($Detail -replace '[\r\n]+', ' ').Trim()
+    if ([string]::IsNullOrWhiteSpace($normalizedDetail)) {
+        $content = $State
+    }
+    else {
+        $content = $State + [Environment]::NewLine + $normalizedDetail
+    }
+    [System.IO.File]::WriteAllText(
+        $StatusPath,
+        $content,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+}
+
+Set-PFAUpdaterStatus -State 'starting'
 $install = [System.IO.Path]::GetFullPath($InstallDirectory)
 $root = [System.IO.Path]::GetPathRoot($install)
 $trimChars = [char[]]@('\', '/')
@@ -46,6 +68,7 @@ $previousUninstallDisplayVersion = $null
 $hadUninstallDisplayName = $false
 $hadUninstallDisplayVersion = $false
 $uninstallRegistryUpdateStarted = $false
+$handoffReady = $false
 
 function Write-PFAUpdateLog {
     param([string]$Status, [string]$Detail)
@@ -117,6 +140,11 @@ try {
         throw "SHA-256 mismatch for $zipName. The installed application was not changed."
     }
 
+    # Do not let the desktop application close until PowerShell has parsed its
+    # arguments, opened its inputs and verified the update archive.
+    Set-PFAUpdaterStatus -State 'ready'
+    $handoffReady = $true
+
     if ($WaitForProcessId -gt 0) {
         $applicationProcess = Get-Process -Id $WaitForProcessId -ErrorAction SilentlyContinue
         if ($applicationProcess) {
@@ -134,6 +162,7 @@ try {
     if ($running) {
         throw "Close POWER_FAULT_ANALYZER before updating. Running PID(s): $($running.ProcessId -join ', ')"
     }
+    Set-PFAUpdaterStatus -State 'applying'
 
     if (Test-Path -LiteralPath $uninstallRegistryPath) {
         $uninstallMetadata = Get-ItemProperty -LiteralPath $uninstallRegistryPath
@@ -260,9 +289,11 @@ try {
     # is still retained at $backup.
     $restartDetail = 'automatic restart was not requested'
     if ($Restart) {
+        Set-PFAUpdaterStatus -State 'restarting'
         $restartedProcess = Start-PFAApplication -ApplicationPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -WorkingDirectory $install
         $restartDetail = "automatic restart confirmed; process_id=$($restartedProcess.Id)"
     }
+    Set-PFAUpdaterStatus -State 'success' -Detail "PFA updated to version $newVersion; $restartDetail"
 
     # Keep the backup after a successful update. On startup failure, leave this flag
     # true so the catch block restores the previous installation automatically.
@@ -278,6 +309,7 @@ try {
 catch {
     $updateError = $_
     $rollbackDetail = 'not required'
+    Set-PFAUpdaterStatus -State 'failed' -Detail $updateError.Exception.Message
     if ($backupMoved -and (Test-Path -LiteralPath $backup -PathType Container)) {
         try {
             if (Test-Path -LiteralPath $install) {
@@ -307,7 +339,7 @@ catch {
         }
     }
     Write-PFAUpdateLog -Status 'failure' -Detail "$($updateError.Exception.Message); $rollbackDetail"
-    if ($Restart -and (Test-Path -LiteralPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -PathType Leaf)) {
+    if ($Restart -and $handoffReady -and (Test-Path -LiteralPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -PathType Leaf)) {
         try {
             if ($WaitForProcessId -gt 0) {
                 try {
@@ -321,11 +353,21 @@ catch {
                 }
             }
             $restoredProcess = Start-PFAApplication -ApplicationPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -WorkingDirectory $install
-            Write-Warning "The previous application was restored and restarted (PID $($restoredProcess.Id))."
+            $recoveryDetail = "Previous application restored and restarted (PID $($restoredProcess.Id))."
+            Set-PFAUpdaterStatus -State 'rolled_back' -Detail $recoveryDetail
+            Write-Warning $recoveryDetail
         }
         catch {
-            Write-Warning "The previous application was restored but could not be restarted automatically: $($_.Exception.Message)"
+            $recoveryDetail = "Previous application restored but restart failed: $($_.Exception.Message)"
+            Set-PFAUpdaterStatus -State 'rollback_restart_failed' -Detail $recoveryDetail
+            Write-Warning $recoveryDetail
         }
+    }
+    elseif (-not $handoffReady) {
+        Set-PFAUpdaterStatus -State 'failed' -Detail $updateError.Exception.Message
+    }
+    else {
+        Set-PFAUpdaterStatus -State 'rollback_failed' -Detail $rollbackDetail
     }
     throw "PFA update failed: $($updateError.Exception.Message). $rollbackDetail. Update record: $logPath"
 }

@@ -2,7 +2,10 @@
 param(
     [Parameter(Mandatory = $true)][string]$ZipPath,
     [Parameter(Mandatory = $true)][string]$ChecksumPath,
-    [Parameter(Mandatory = $true)][string]$InstallDirectory
+    [Parameter(Mandatory = $true)][string]$InstallDirectory,
+    [int]$WaitForProcessId = 0,
+    [switch]$Restart,
+    [string]$CleanupDirectory = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,6 +51,18 @@ if (-not (Test-Path -LiteralPath $install -PathType Container)) {
 $exe = Join-Path $install 'POWER_FAULT_ANALYZER.exe'
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
     throw "The target is not a PFA portable application directory: $install"
+}
+
+if ($WaitForProcessId -gt 0) {
+    $applicationProcess = Get-Process -Id $WaitForProcessId -ErrorAction SilentlyContinue
+    if ($applicationProcess) {
+        try {
+            Wait-Process -Id $WaitForProcessId -Timeout 90 -ErrorAction Stop
+        }
+        catch {
+            throw "Timed out waiting for POWER_FAULT_ANALYZER to close (PID $WaitForProcessId)."
+        }
+    }
 }
 
 $running = Get-CimInstance Win32_Process -Filter "Name='POWER_FAULT_ANALYZER.exe'" |
@@ -147,6 +162,14 @@ try {
     Write-Host "Previous application retained at: $backup" -ForegroundColor Yellow
     Write-Host "Update record: $logPath"
     Write-Host 'Projects and Qt preferences outside the application directory were not modified.'
+    if ($Restart) {
+        try {
+            Start-Process -FilePath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -WorkingDirectory $install
+        }
+        catch {
+            Write-Warning "The update succeeded, but the new application did not restart automatically: $($_.Exception.Message)"
+        }
+    }
 }
 catch {
     $updateError = $_
@@ -166,10 +189,39 @@ catch {
         }
     }
     Write-PFAUpdateLog -Status 'failure' -Detail "$($updateError.Exception.Message); $rollbackDetail"
+    if ($Restart -and (Test-Path -LiteralPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -PathType Leaf)) {
+        try {
+            Start-Process -FilePath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -WorkingDirectory $install
+        }
+        catch {
+            Write-Warning "The previous application was restored but could not be restarted automatically: $($_.Exception.Message)"
+        }
+    }
     throw "PFA update failed: $($updateError.Exception.Message). $rollbackDetail. Update record: $logPath"
 }
 finally {
     if (Test-Path -LiteralPath $staging) {
         Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (-not [string]::IsNullOrWhiteSpace($CleanupDirectory)) {
+        try {
+            $cleanupFullPath = [System.IO.Path]::GetFullPath($CleanupDirectory)
+            $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+            if ($cleanupFullPath.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $escapedCleanupPath = $cleanupFullPath.Replace("'", "''")
+                $cleanupCommand = "Start-Sleep -Seconds 8; Remove-Item -LiteralPath '$escapedCleanupPath' -Recurse -Force -ErrorAction SilentlyContinue"
+                $encodedCleanupCommand = [Convert]::ToBase64String(
+                    [System.Text.Encoding]::Unicode.GetBytes($cleanupCommand)
+                )
+                $cleanupPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+                Start-Process -FilePath $cleanupPowerShell -ArgumentList @(
+                    '-NoLogo', '-NoProfile', '-WindowStyle', 'Hidden',
+                    '-EncodedCommand', $encodedCleanupCommand
+                ) -WindowStyle Hidden | Out-Null
+            }
+        }
+        catch {
+            Write-Warning "Could not schedule temporary update download cleanup: $($_.Exception.Message)"
+        }
     }
 }

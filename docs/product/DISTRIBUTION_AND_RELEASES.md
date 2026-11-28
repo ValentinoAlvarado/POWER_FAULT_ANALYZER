@@ -36,24 +36,19 @@ A configured workflow is not proof of a successful build. A workflow artifact is
 
 ## Portable update without reinstalling
 
-The portable updater is an external PowerShell script. It does not run inside the GUI. Download these three files from the same successful workflow artifact:
+The desktop GUI checks the public GitHub Releases feed at startup (enabled by default) and also exposes **Help → Check for Updates…**. The preference can be disabled from the same Help menu. The check sends only an unauthenticated request for public release metadata; it does not upload project data, documents, telemetry or machine identifiers.
+
+Only a published GitHub Release with all three required assets is considered an update. Temporary GitHub Actions workflow artifacts are intentionally excluded. A tagged release must publish:
 
 - `PFA-Windows-x64.zip`
 - `SHA256SUMS.txt`
 - `Update-PFA-Portable.ps1`
 
-Close PFA before updating. Verify that project files are stored outside the application directory. Run the updater from PowerShell 5.1 or later:
+When a newer version is found, PFA asks the user before downloading anything. After consent, it saves a dirty project, downloads the three assets in the background, verifies both the ZIP and PowerShell updater against the same SHA-256 manifest, and launches the updater in a hidden PowerShell process. PFA then closes so Windows can replace the portable application directory in place. The updater waits for the GUI process to exit, stages and validates the onedir archive, retains the previous application as a uniquely named backup, promotes the new files and restarts PFA. A promotion failure restores the prior application and attempts to restart it. Temporary download files are scheduled for cleanup after the updater exits.
 
-```powershell
-& .\Update-PFA-Portable.ps1 `
-    -ZipPath "C:\Downloads\PFA-Windows-x64.zip" `
-    -ChecksumPath "C:\Downloads\SHA256SUMS.txt" `
-    -InstallDirectory "C:\PFA_ACCEPTANCE_RUN18\application"
-```
+The update does not run an uninstall/reinstall wizard and does not replace the user's project directory or Qt preferences. Projects must remain outside the application folder, for example in `Documents\POWER_FAULT_ANALYZER\Projects\`. Keep the generated `application.backup-*` directory until the new version and representative workflows have been accepted.
 
-The updater checks the ZIP SHA-256 against the downloaded manifest before touching the current installation. It stages and inspects the onedir package, checks product/architecture/build metadata, detects a running executable, retains the previous application in a uniquely named backup directory, and attempts rollback if promotion fails. It writes an update record beside the installation. Do not delete the backup until the updated executable and representative project workflows have been accepted.
-
-Qt workbench geometry, panel state and theme are persisted separately through `QSettings`; the replacement script does not modify those preferences. Project documents should remain in a user-owned location such as `Documents\POWER_FAULT_ANALYZER\Projects\`, never inside the portable application directory.
+A portable build downloaded directly from a GitHub Actions artifact can be tested manually, but it does not become discoverable to the in-app checker until a complete version is published as a GitHub Release. Publishing the first release still requires the tag-triggered dependency-license review gate and the usual release acceptance checks.
 
 ## Public download page
 

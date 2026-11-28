@@ -112,6 +112,7 @@ jobs:
             dist/release/THIRD_PARTY_NOTICES.md
             dist/release/BUILD-INFO.json
             dist/release/Update-PFA-Portable.ps1
+            dist/release/Update-PFA-Portable.ps1
       - name: Render SVG and Qt diagram acceptance gallery
         shell: pwsh
         env:

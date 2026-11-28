@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 import traceback
 from copy import deepcopy
@@ -45,6 +47,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QSplitter,
     QSplitterHandle,
@@ -125,6 +128,12 @@ from power_fault_analyzer.interfaces.desktop.workbench.dialogs import (
 from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import NetworkCanvasView
 from power_fault_analyzer.interfaces.desktop.workbench.qet_symbol_browser import QETSymbolBrowser
 from power_fault_analyzer.interfaces.desktop.workbench.results_workspace import ResultsWorkspace
+from power_fault_analyzer.interfaces.desktop.release_updates import (
+    ReleaseUpdate,
+    download_update_bundle,
+    discover_latest_release,
+    load_installation_build_info,
+)
 from power_fault_analyzer.operations import analyze_workspace, scenario_from_physical_network
 from power_fault_analyzer.operations.models import SwitchPosition as OperatingSwitchPosition
 
@@ -135,7 +144,7 @@ class _WorkerSignals(QObject):
 
 
 class _StudyWorker(QRunnable):
-    """Run the numerical use case away from the GUI thread."""
+    """Run a callable away from the GUI thread."""
 
     def __init__(self, callable_):
         super().__init__()
@@ -147,6 +156,31 @@ class _StudyWorker(QRunnable):
             self.signals.succeeded.emit(self._callable())
         except Exception:  # noqa: BLE001 - isolate failures at the worker/GUI boundary.
             self.signals.failed.emit(traceback.format_exc())
+
+
+class _UpdateDownloadSignals(QObject):
+    completed = Signal(object)
+    failed = Signal(str)
+    progress = Signal(int)
+
+
+class _UpdateDownloadWorker(QRunnable):
+    """Download and verify a published portable update without blocking Qt."""
+
+    def __init__(self, release: ReleaseUpdate) -> None:
+        super().__init__()
+        self.release = release
+        self.signals = _UpdateDownloadSignals()
+
+    def run(self) -> None:
+        try:
+            bundle = download_update_bundle(
+                self.release,
+                progress=self.signals.progress.emit,
+            )
+            self.signals.completed.emit(bundle)
+        except Exception as exc:  # noqa: BLE001 - isolate failures at the worker/GUI boundary.
+            self.signals.failed.emit(str(exc))
 
 
 class _MoveDiagramItemCommand(QUndoCommand):
@@ -387,6 +421,12 @@ class WorkbenchWindow(QMainWindow):
         self._dark_theme = (
             self._ui_settings.value("appearance/theme", "light", type=str) == "dark"
         )
+        self._updates_on_startup = self._ui_settings.value(
+            "updates/check_on_startup", True, type=bool
+        )
+        self._update_check_worker = None
+        self._update_download_worker = None
+        self._update_progress: QProgressDialog | None = None
         self._build_actions()
         self._build_docks()
         self._build_central_workspace()
@@ -402,6 +442,8 @@ class WorkbenchWindow(QMainWindow):
         self.setWindowTitle("POWER_FAULT_ANALYZER — Engineering Workbench")
         self.statusBar().showMessage("Ready · Physical network model · 60 Hz")
         self._log("Workbench initialized. Add equipment or load REF-3PH-001B template.")
+        if self._updates_on_startup and getattr(sys, "frozen", False):
+            QTimer.singleShot(4000, lambda: self._check_for_updates(automatic=True))
 
     # ------------------------------------------------------------------ actions
     def _awesome_icon(self, name: str, fallback: QStyle.StandardPixmap):
@@ -570,6 +612,16 @@ class WorkbenchWindow(QMainWindow):
             "Keyboard Shortcuts…", self._show_keyboard_shortcuts, "F1"
         )
         help_menu.addAction(self.keyboard_shortcuts_action)
+        help_menu.addSeparator()
+        self.check_updates_action = self._action(
+            "Check for Updates…", lambda: self._check_for_updates(automatic=False)
+        )
+        help_menu.addAction(self.check_updates_action)
+        self.check_updates_on_startup_action = QAction("Check for Updates at Startup", self)
+        self.check_updates_on_startup_action.setCheckable(True)
+        self.check_updates_on_startup_action.setChecked(self._updates_on_startup)
+        self.check_updates_on_startup_action.toggled.connect(self._set_update_check_preference)
+        help_menu.addAction(self.check_updates_on_startup_action)
         help_menu.addSeparator()
         help_menu.addAction(self._action("About POWER_FAULT_ANALYZER", self._about))
 
@@ -3421,6 +3473,212 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
     def _toggle_theme(self, checked: bool | None = None) -> None:
         self._dark_theme = not self._dark_theme if checked is None else bool(checked)
         self._apply_theme(persist=True)
+
+    def _set_update_check_preference(self, enabled: bool) -> None:
+        self._updates_on_startup = bool(enabled)
+        self._ui_settings.setValue("updates/check_on_startup", self._updates_on_startup)
+        self.statusBar().showMessage(
+            "Automatic update checks enabled." if enabled else "Automatic update checks disabled.",
+            5000,
+        )
+
+    def _check_for_updates(self, *, automatic: bool = False) -> None:
+        if self._update_check_worker is not None:
+            return
+        build_info = load_installation_build_info()
+        if build_info is None:
+            if not automatic:
+                QMessageBox.information(
+                    self,
+                    "Software Updates",
+                    "Update checks are available in the installed Windows x64 portable build. "
+                    "A source checkout cannot replace itself.",
+                )
+            return
+
+        self.check_updates_action.setEnabled(False)
+        self.statusBar().showMessage("Checking for a newer published PFA release…")
+        worker = _StudyWorker(
+            lambda: discover_latest_release(build_info["version"])
+        )
+        worker.signals.succeeded.connect(
+            lambda release: self._update_check_completed(release, automatic)
+        )
+        worker.signals.failed.connect(
+            lambda detail: self._update_check_failed(detail, automatic)
+        )
+        self._update_check_worker = worker
+        self._thread_pool.start(worker)
+
+    def _update_check_completed(
+        self, release: ReleaseUpdate | None, automatic: bool
+    ) -> None:
+        self._update_check_worker = None
+        self.check_updates_action.setEnabled(True)
+        if release is None:
+            self.statusBar().showMessage("PFA is up to date with the latest published release.", 7000)
+            if not automatic:
+                QMessageBox.information(
+                    self,
+                    "Software Updates",
+                    "No newer complete Windows x64 release is available. "
+                    "Only published GitHub Releases are considered; workflow artifacts are not "
+                    "treated as public product versions.",
+                )
+            return
+
+        notes = release.body.strip()
+        if len(notes) > 1400:
+            notes = notes[:1400].rstrip() + "…"
+        details = (
+            f"A newer POWER_FAULT_ANALYZER version is available.\n\n"
+            f"Installed: {load_installation_build_info()['version']}\n"
+            f"Available: {release.tag_name}\n\n"
+            f"{notes or 'No release notes were provided.'}\n\n"
+            "The portable application will be updated in place. Your project files and "
+            "preferences are stored separately. The previous application folder will be "
+            "retained as a rollback backup."
+        )
+        answer = QMessageBox.question(
+            self,
+            "PFA Update Available",
+            details,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._start_update_download(release)
+
+    def _update_check_failed(self, detail: str, automatic: bool) -> None:
+        self._update_check_worker = None
+        self.check_updates_action.setEnabled(True)
+        self.statusBar().showMessage("Could not check for PFA updates.", 7000)
+        if not automatic:
+            QMessageBox.warning(
+                self,
+                "Update Check Failed",
+                f"GitHub could not be reached or returned invalid release metadata.\n\n{detail}",
+            )
+
+    def _start_update_download(self, release: ReleaseUpdate) -> None:
+        if self._dirty and not self._save_project():
+            QMessageBox.information(
+                self,
+                "PFA Update",
+                "The update was cancelled because the current project could not be saved.",
+            )
+            return
+
+        self._update_progress = QProgressDialog(
+            f"Downloading POWER_FAULT_ANALYZER {release.tag_name}…", "", 0, 100, self
+        )
+        self._update_progress.setWindowTitle("PFA Update")
+        self._update_progress.setCancelButton(None)
+        self._update_progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self._update_progress.setMinimumDuration(0)
+        self._update_progress.setAutoClose(False)
+        self._update_progress.setAutoReset(False)
+        self._update_progress.setValue(0)
+        self._update_progress.show()
+
+        worker = _UpdateDownloadWorker(release)
+        worker.signals.progress.connect(self._update_download_progress)
+        worker.signals.completed.connect(self._update_download_completed)
+        worker.signals.failed.connect(self._update_download_failed)
+        self._update_download_worker = worker
+        self._thread_pool.start(worker)
+
+    def _update_download_progress(self, value: int) -> None:
+        if self._update_progress is not None:
+            self._update_progress.setValue(value)
+
+    def _update_download_completed(self, bundle) -> None:
+        self._update_download_worker = None
+        if self._update_progress is not None:
+            self._update_progress.close()
+            self._update_progress = None
+        self._launch_portable_update(bundle)
+
+    def _update_download_failed(self, detail: str) -> None:
+        self._update_download_worker = None
+        if self._update_progress is not None:
+            self._update_progress.close()
+            self._update_progress = None
+        QMessageBox.critical(
+            self,
+            "PFA Update Failed",
+            f"The update package could not be downloaded or verified. "
+            f"The installed application has not been changed.\n\n{detail}",
+        )
+
+    def _launch_portable_update(self, bundle) -> None:
+        install_directory = Path(sys.executable).resolve().parent
+        executable = install_directory / "POWER_FAULT_ANALYZER.exe"
+        powershell = (
+            Path(os.environ.get("SystemRoot", r"C:\Windows"))
+            / "System32"
+            / "WindowsPowerShell"
+            / "v1.0"
+            / "powershell.exe"
+        )
+        if not executable.is_file() or not powershell.is_file():
+            QMessageBox.critical(
+                self,
+                "PFA Update",
+                "The portable installation or Windows PowerShell could not be located. "
+                "The current version was not changed.",
+            )
+            return
+
+        arguments = [
+            str(powershell),
+            "-NoLogo",
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(bundle.updater_script),
+            "-ZipPath",
+            str(bundle.archive),
+            "-ChecksumPath",
+            str(bundle.checksum_manifest),
+            "-InstallDirectory",
+            str(install_directory),
+            "-WaitForProcessId",
+            str(os.getpid()),
+            "-Restart",
+            "-CleanupDirectory",
+            str(bundle.directory),
+        ]
+        startup_info = subprocess.STARTUPINFO()
+        startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup_info.wShowWindow = subprocess.SW_HIDE
+        creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        try:
+            subprocess.Popen(
+                arguments,
+                cwd=str(install_directory),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                startupinfo=startup_info,
+                creationflags=creation_flags,
+            )
+        except OSError as exc:
+            QMessageBox.critical(
+                self,
+                "PFA Update",
+                f"Could not start the portable updater. The current version was not changed.\n\n{exc}",
+            )
+            return
+
+        self.statusBar().showMessage(
+            "Update prepared. Closing PFA so the verified replacement can be applied…"
+        )
+        QTimer.singleShot(350, self.close)
 
     def _about(self) -> None:
         QMessageBox.information(

@@ -69,6 +69,7 @@ $hadUninstallDisplayName = $false
 $hadUninstallDisplayVersion = $false
 $uninstallRegistryUpdateStarted = $false
 $handoffReady = $false
+$handoffAccepted = $false
 
 function Write-PFAUpdateLog {
     param([string]$Status, [string]$Detail)
@@ -144,6 +145,26 @@ try {
     # arguments, opened its inputs and verified the update archive.
     Set-PFAUpdaterStatus -State 'ready'
     $handoffReady = $true
+
+    if (-not [string]::IsNullOrWhiteSpace($StatusPath) -and $WaitForProcessId -gt 0) {
+        $acknowledgementDeadline = (Get-Date).AddSeconds(15)
+        while ((Get-Date) -lt $acknowledgementDeadline) {
+            $acknowledgement = Get-Content -LiteralPath $StatusPath -TotalCount 1 -ErrorAction SilentlyContinue
+            if ($acknowledgement -eq 'accepted') {
+                $handoffAccepted = $true
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $handoffAccepted) {
+            $handoffReady = $false
+            throw 'The desktop application did not acknowledge the updater handoff. Installation was not changed.'
+        }
+    }
+    else {
+        # Backwards compatibility for manual/legacy invocations without a status file.
+        $handoffAccepted = $true
+    }
 
     if ($WaitForProcessId -gt 0) {
         $applicationProcess = Get-Process -Id $WaitForProcessId -ErrorAction SilentlyContinue
@@ -339,7 +360,7 @@ catch {
         }
     }
     Write-PFAUpdateLog -Status 'failure' -Detail "$($updateError.Exception.Message); $rollbackDetail"
-    if ($Restart -and $handoffReady -and (Test-Path -LiteralPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -PathType Leaf)) {
+    if ($Restart -and $handoffAccepted -and (Test-Path -LiteralPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -PathType Leaf)) {
         try {
             if ($WaitForProcessId -gt 0) {
                 try {

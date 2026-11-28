@@ -26,6 +26,38 @@ function New-TestInstall {
 }
 
 try {
+    # An empty manifest must be logged and rejected before touching the installation.
+    $emptyRoot = Join-Path $testRoot 'empty checksum manifest'
+    $emptyInstall = Join-Path $emptyRoot 'application'
+    New-Item -ItemType Directory -Path $emptyRoot | Out-Null
+    New-TestInstall -Directory $emptyInstall -Version 'old-empty-manifest-test'
+    $emptyManifest = Join-Path $emptyRoot 'SHA256SUMS.txt'
+    [System.IO.File]::WriteAllText($emptyManifest, [string]::Empty)
+    $emptyRejected = $false
+    try {
+        & $updater -ZipPath $zip -ChecksumPath $emptyManifest -InstallDirectory $emptyInstall
+    }
+    catch {
+        if ($_.Exception.Message -like '*SHA256SUMS.txt is empty*') {
+            $emptyRejected = $true
+        }
+        else {
+            throw
+        }
+    }
+    if (-not $emptyRejected) { throw 'An empty checksum manifest was not rejected.' }
+    if ((Get-Content -LiteralPath (Join-Path $emptyInstall 'POWER_FAULT_ANALYZER.exe') -Raw).Trim() -ne 'old-old-empty-manifest-test') {
+        throw 'An empty checksum manifest modified the existing installation.'
+    }
+    $emptyLog = Get-ChildItem -LiteralPath $emptyRoot -Filter 'application-update-*.log' -File |
+        Select-Object -First 1
+    if (-not $emptyLog) { throw 'An empty checksum manifest failure did not produce an update log.' }
+    $emptyLogText = Get-Content -LiteralPath $emptyLog.FullName -Raw
+    if (-not $emptyLogText.Contains('status=failure') -or
+        -not $emptyLogText.Contains('SHA256SUMS.txt is empty')) {
+        throw 'The preflight update log did not record the empty-manifest failure.'
+    }
+
     # A checksum mismatch must fail before the existing installation is moved.
     $badRoot = Join-Path $testRoot 'checksum failure'
     $badInstall = Join-Path $badRoot 'application'
@@ -49,6 +81,49 @@ try {
     if (-not $hashRejected) { throw 'Checksum mismatch was not rejected.' }
     if ((Get-Content -LiteralPath (Join-Path $badInstall 'POWER_FAULT_ANALYZER.exe') -Raw).Trim() -ne 'old-old-checksum-test') {
         throw 'Checksum rejection modified the existing installation.'
+    }
+
+    # A replacement that cannot launch must roll back to the previous application.
+    $startupRoot = Join-Path $testRoot 'startup failure rollback'
+    $startupInstall = Join-Path $startupRoot 'application'
+    New-Item -ItemType Directory -Path $startupRoot | Out-Null
+    New-TestInstall -Directory $startupInstall -Version 'old-startup-failure-test'
+    function global:Start-Process {
+        [CmdletBinding()]
+        param(
+            [string]$FilePath,
+            [string]$WorkingDirectory,
+            [switch]$PassThru
+        )
+        throw 'Simulated application startup failure.'
+    }
+    $startupFailureObserved = $false
+    try {
+        & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $startupInstall -Restart
+    }
+    catch {
+        if ($_.Exception.Message -like '*PFA update failed*') {
+            $startupFailureObserved = $true
+        }
+        else {
+            throw
+        }
+    }
+    finally {
+        Remove-Item Function:\global:Start-Process -ErrorAction SilentlyContinue
+    }
+    if (-not $startupFailureObserved) {
+        throw 'An application startup failure did not fail the update transaction.'
+    }
+    $startupRestoredInfo = Get-Content -LiteralPath (Join-Path $startupInstall 'BUILD-INFO.json') -Raw | ConvertFrom-Json
+    if ($startupRestoredInfo.version -ne 'old-startup-failure-test') {
+        throw 'Failed application startup did not restore the previous installation.'
+    }
+    $startupFailedPackage = Get-ChildItem -LiteralPath $startupRoot -Directory |
+        Where-Object { $_.Name -like 'application.failed-*' } |
+        Select-Object -First 1
+    if (-not $startupFailedPackage) {
+        throw 'Failed replacement package was not quarantined after startup rollback.'
     }
 
     # A normal promotion must retain the old application and outside user data.
@@ -181,6 +256,7 @@ try {
     }
 
     Write-Host 'PASS updater rejected checksum mismatch without modifying the installation.' -ForegroundColor Green
+    Write-Host 'PASS updater rolled back automatically when the replacement application failed to start.' -ForegroundColor Green
     Write-Host 'PASS updater promoted the new package and retained the previous application.' -ForegroundColor Green
     Write-Host 'PASS NSIS uninstaller and Windows uninstall registry metadata survived the in-place update.' -ForegroundColor Green
     Write-Host 'PASS injected promotion failure restored the original application.' -ForegroundColor Green

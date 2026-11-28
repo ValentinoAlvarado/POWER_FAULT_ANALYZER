@@ -10,30 +10,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$zip = (Resolve-Path -LiteralPath $ZipPath -ErrorAction Stop).Path
-$checksum = (Resolve-Path -LiteralPath $ChecksumPath -ErrorAction Stop).Path
-$zipName = Split-Path -Leaf $zip
-if ($zipName -ne 'PFA-Windows-x64.zip') {
-    throw 'The update archive must be named PFA-Windows-x64.zip.'
-}
-
-$expectedHash = $null
-foreach ($line in Get-Content -LiteralPath $checksum -ErrorAction Stop) {
-    if ($line -match '^\s*(?<hash>[A-Fa-f0-9]{64})\s+(?<file>.+?)\s*$') {
-        if ($Matches.file.Trim().TrimStart('*') -eq $zipName) {
-            $expectedHash = $Matches.hash.ToLowerInvariant()
-            break
-        }
-    }
-}
-if ([string]::IsNullOrWhiteSpace($expectedHash)) {
-    throw "Checksum manifest does not contain an entry for $zipName."
-}
-$actualHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actualHash -ne $expectedHash) {
-    throw "SHA-256 mismatch for $zipName. The installed application was not changed."
-}
-
 $install = [System.IO.Path]::GetFullPath($InstallDirectory)
 $root = [System.IO.Path]::GetPathRoot($install)
 $trimChars = [char[]]@('\', '/')
@@ -54,24 +30,6 @@ if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
     throw "The target is not a PFA portable application directory: $install"
 }
 
-if ($WaitForProcessId -gt 0) {
-    $applicationProcess = Get-Process -Id $WaitForProcessId -ErrorAction SilentlyContinue
-    if ($applicationProcess) {
-        try {
-            Wait-Process -Id $WaitForProcessId -Timeout 90 -ErrorAction Stop
-        }
-        catch {
-            throw "Timed out waiting for POWER_FAULT_ANALYZER to close (PID $WaitForProcessId)."
-        }
-    }
-}
-
-$running = Get-CimInstance Win32_Process -Filter "Name='POWER_FAULT_ANALYZER.exe'" |
-    Where-Object { $_.ExecutablePath -and $_.ExecutablePath -ieq $exe }
-if ($running) {
-    throw "Close POWER_FAULT_ANALYZER before updating. Running PID(s): $($running.ProcessId -join ', ')"
-}
-
 $token = [guid]::NewGuid().ToString('N')
 $staging = Join-Path $parent ".$name.update-$token"
 $backup = Join-Path $parent "$name.backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')-$token"
@@ -81,23 +39,13 @@ $backupMoved = $false
 $previousVersion = 'unknown'
 $newVersion = 'unknown'
 $newCommit = 'unknown'
+$actualHash = 'not-verified'
 $uninstallRegistryPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\POWER_FAULT_ANALYZER'
 $previousUninstallDisplayName = $null
 $previousUninstallDisplayVersion = $null
 $hadUninstallDisplayName = $false
 $hadUninstallDisplayVersion = $false
 $uninstallRegistryUpdateStarted = $false
-if (Test-Path -LiteralPath $uninstallRegistryPath) {
-    $uninstallMetadata = Get-ItemProperty -LiteralPath $uninstallRegistryPath
-    if ($uninstallMetadata.PSObject.Properties.Name -contains 'DisplayName') {
-        $hadUninstallDisplayName = $true
-        $previousUninstallDisplayName = [string]$uninstallMetadata.DisplayName
-    }
-    if ($uninstallMetadata.PSObject.Properties.Name -contains 'DisplayVersion') {
-        $hadUninstallDisplayVersion = $true
-        $previousUninstallDisplayVersion = [string]$uninstallMetadata.DisplayVersion
-    }
-}
 
 function Write-PFAUpdateLog {
     param([string]$Status, [string]$Detail)
@@ -107,7 +55,7 @@ function Write-PFAUpdateLog {
         "previous_version=$script:previousVersion"
         "new_version=$script:newVersion"
         "new_commit=$script:newCommit"
-        "zip_sha256=$actualHash"
+        "zip_sha256=$script:actualHash"
         "install_directory=$install"
         "backup_directory=$backup"
         "detail=$Detail"
@@ -120,7 +68,85 @@ function Write-PFAUpdateLog {
     }
 }
 
+function Start-PFAApplication {
+    param([string]$ApplicationPath, [string]$WorkingDirectory)
+    $lastExitCode = 'unknown'
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        $started = Start-Process -FilePath $ApplicationPath -WorkingDirectory $WorkingDirectory -PassThru -ErrorAction Stop
+        Start-Sleep -Seconds 8
+        $started.Refresh()
+        if (-not $started.HasExited) {
+            return $started
+        }
+        $lastExitCode = $started.ExitCode
+        if ($attempt -lt 2) {
+            Start-Sleep -Seconds 2
+        }
+    }
+    throw "POWER_FAULT_ANALYZER exited during both startup attempts (last exit code: $lastExitCode)."
+}
+
 try {
+    $zip = (Resolve-Path -LiteralPath $ZipPath -ErrorAction Stop).Path
+    $checksum = (Resolve-Path -LiteralPath $ChecksumPath -ErrorAction Stop).Path
+    $zipName = Split-Path -Leaf $zip
+    if ($zipName -ne 'PFA-Windows-x64.zip') {
+        throw 'The update archive must be named PFA-Windows-x64.zip.'
+    }
+    if ((Get-Item -LiteralPath $zip -ErrorAction Stop).Length -le 0) {
+        throw 'Update archive is empty.'
+    }
+    if ((Get-Item -LiteralPath $checksum -ErrorAction Stop).Length -le 0) {
+        throw 'SHA256SUMS.txt is empty. The installed application was not changed.'
+    }
+
+    $expectedHash = $null
+    foreach ($line in Get-Content -LiteralPath $checksum -ErrorAction Stop) {
+        if ($line -match '^\s*(?<hash>[A-Fa-f0-9]{64})\s+(?<file>.+?)\s*$') {
+            if ($Matches.file.Trim().TrimStart('*') -eq $zipName) {
+                $expectedHash = $Matches.hash.ToLowerInvariant()
+                break
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($expectedHash)) {
+        throw "Checksum manifest does not contain an entry for $zipName."
+    }
+    $actualHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $expectedHash) {
+        throw "SHA-256 mismatch for $zipName. The installed application was not changed."
+    }
+
+    if ($WaitForProcessId -gt 0) {
+        $applicationProcess = Get-Process -Id $WaitForProcessId -ErrorAction SilentlyContinue
+        if ($applicationProcess) {
+            try {
+                Wait-Process -Id $WaitForProcessId -Timeout 90 -ErrorAction Stop
+            }
+            catch {
+                throw "Timed out waiting for POWER_FAULT_ANALYZER to close (PID $WaitForProcessId)."
+            }
+        }
+    }
+
+    $running = Get-CimInstance Win32_Process -Filter "Name='POWER_FAULT_ANALYZER.exe'" |
+        Where-Object { $_.ExecutablePath -and $_.ExecutablePath -ieq $exe }
+    if ($running) {
+        throw "Close POWER_FAULT_ANALYZER before updating. Running PID(s): $($running.ProcessId -join ', ')"
+    }
+
+    if (Test-Path -LiteralPath $uninstallRegistryPath) {
+        $uninstallMetadata = Get-ItemProperty -LiteralPath $uninstallRegistryPath
+        if ($uninstallMetadata.PSObject.Properties.Name -contains 'DisplayName') {
+            $hadUninstallDisplayName = $true
+            $previousUninstallDisplayName = [string]$uninstallMetadata.DisplayName
+        }
+        if ($uninstallMetadata.PSObject.Properties.Name -contains 'DisplayVersion') {
+            $hadUninstallDisplayVersion = $true
+            $previousUninstallDisplayVersion = [string]$uninstallMetadata.DisplayVersion
+        }
+    }
+
     try {
         $oldBuildInfo = Join-Path $install 'BUILD-INFO.json'
         if (Test-Path -LiteralPath $oldBuildInfo -PathType Leaf) {
@@ -229,23 +255,25 @@ try {
         Set-ItemProperty -LiteralPath $uninstallRegistryPath -Name 'DisplayVersion' -Value $newVersion -ErrorAction Stop
     }
 
-    # Keep the backup after success. It is the operator's rollback copy.
+    # Confirm the replacement can start before declaring the update successful.
+    # A failed startup raises into the rollback path while the previous application
+    # is still retained at $backup.
+    $restartDetail = 'automatic restart was not requested'
+    if ($Restart) {
+        $restartedProcess = Start-PFAApplication -ApplicationPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -WorkingDirectory $install
+        $restartDetail = "automatic restart confirmed; process_id=$($restartedProcess.Id)"
+    }
+
+    # Keep the backup after a successful update. On startup failure, leave this flag
+    # true so the catch block restores the previous installation automatically.
     $backupMoved = $false
-    Write-PFAUpdateLog -Status 'success' -Detail "New application promoted and verified; previous application retained; migrated $migratedProjectCount project document(s) to $userProjectsRoot."
+    Write-PFAUpdateLog -Status 'success' -Detail "New application promoted and verified; previous application retained; migrated $migratedProjectCount project document(s) to $userProjectsRoot; $restartDetail."
     Write-Host "PFA updated to version $newVersion." -ForegroundColor Green
     Write-Host "Previous application retained at: $backup" -ForegroundColor Yellow
     Write-Host "Update record: $logPath"
     Write-Host "Migrated project documents found inside the old installation: $migratedProjectCount"
     Write-Host "Project folder: $userProjectsRoot"
     Write-Host 'Projects and Qt preferences outside the application directory were not modified.'
-    if ($Restart) {
-        try {
-            Start-Process -FilePath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -WorkingDirectory $install
-        }
-        catch {
-            Write-Warning "The update succeeded, but the new application did not restart automatically: $($_.Exception.Message)"
-        }
-    }
 }
 catch {
     $updateError = $_
@@ -281,7 +309,19 @@ catch {
     Write-PFAUpdateLog -Status 'failure' -Detail "$($updateError.Exception.Message); $rollbackDetail"
     if ($Restart -and (Test-Path -LiteralPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -PathType Leaf)) {
         try {
-            Start-Process -FilePath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -WorkingDirectory $install
+            if ($WaitForProcessId -gt 0) {
+                try {
+                    Wait-Process -Id $WaitForProcessId -Timeout 90 -ErrorAction Stop
+                }
+                catch {
+                    $stillRunning = Get-Process -Id $WaitForProcessId -ErrorAction SilentlyContinue
+                    if ($stillRunning) {
+                        throw "Original PFA process $WaitForProcessId is still running; refusing to launch a duplicate instance."
+                    }
+                }
+            }
+            $restoredProcess = Start-PFAApplication -ApplicationPath (Join-Path $install 'POWER_FAULT_ANALYZER.exe') -WorkingDirectory $install
+            Write-Warning "The previous application was restored and restarted (PID $($restoredProcess.Id))."
         }
         catch {
             Write-Warning "The previous application was restored but could not be restarted automatically: $($_.Exception.Message)"

@@ -17,9 +17,9 @@ _REQUIRED = (
 
 
 class _Response(io.BytesIO):
-    def __init__(self, payload: bytes):
+    def __init__(self, payload: bytes, *, headers: dict[str, str] | None = None):
         super().__init__(payload)
-        self.headers = {}
+        self.headers = headers or {}
 
 
 def _release_payload(tag: str = "v0.1.0b2", *, include_all_assets: bool = True) -> dict:
@@ -34,10 +34,12 @@ def _release_payload(tag: str = "v0.1.0b2", *, include_all_assets: bool = True) 
         "body": "Update notes",
         "assets": [
             {
+                "id": 1000 + index,
+                "digest": "sha256:" + ("a" * 64),
                 "name": name,
                 "browser_download_url": f"https://github.com/ValentinoAlvarado/POWER_FAULT_ANALYZER/releases/download/{tag}/{name}",
             }
-            for name in names
+            for index, name in enumerate(names)
         ],
     }
 
@@ -74,6 +76,9 @@ def test_discover_latest_complete_release_including_prereleases():
     assert release.tag_name == "v0.2.0b1"
     assert release.version == "0.2.0b1"
     assert set(release.asset_urls) == set(_REQUIRED)
+    assert set(release.asset_api_urls) == set(_REQUIRED)
+    assert release.asset_api_urls["SHA256SUMS.txt"].endswith("/releases/assets/1001")
+    assert release.asset_hashes["SHA256SUMS.txt"] == "a" * 64
 
 
 def test_discover_latest_release_returns_none_when_current_is_current():
@@ -228,3 +233,105 @@ def test_download_update_bundle_rejects_modified_updater_script(tmp_path: Path):
 
     with pytest.raises(ValueError, match="SHA-256 mismatch for Update-PFA-Portable.ps1"):
         release_updates.download_update_bundle(release, destination=tmp_path / "download", opener=opener)
+
+
+def test_download_update_bundle_falls_back_when_github_asset_api_digest_mismatches(
+    tmp_path: Path,
+):
+    archive_bytes = b"portable update archive bytes"
+    updater_bytes = b"Write-Host 'verified updater'"
+    checksum_bytes = (
+        f"{hashlib.sha256(archive_bytes).hexdigest()}  PFA-Windows-x64.zip\n"
+        f"{hashlib.sha256(updater_bytes).hexdigest()}  Update-PFA-Portable.ps1\n"
+    ).encode("ascii")
+    browser_urls = {
+        "SHA256SUMS.txt": "https://github.com/example/release/SHA256SUMS.txt",
+        "Update-PFA-Portable.ps1": "https://github.com/example/release/Update-PFA-Portable.ps1",
+        "PFA-Windows-x64.zip": "https://github.com/example/release/PFA-Windows-x64.zip",
+    }
+    api_urls = {
+        name: f"https://api.github.com/repos/example/repo/releases/assets/{index}"
+        for index, name in enumerate(_REQUIRED, start=1)
+    }
+    contents = {
+        browser_urls["SHA256SUMS.txt"]: checksum_bytes,
+        browser_urls["Update-PFA-Portable.ps1"]: updater_bytes,
+        browser_urls["PFA-Windows-x64.zip"]: archive_bytes,
+        api_urls["SHA256SUMS.txt"]: b"corrupted manifest",
+        api_urls["Update-PFA-Portable.ps1"]: updater_bytes,
+        api_urls["PFA-Windows-x64.zip"]: archive_bytes,
+    }
+    requests: list[str] = []
+
+    def opener(request, timeout):
+        requests.append(request.full_url)
+        payload = contents[request.full_url]
+        return _Response(payload, headers={"Content-Length": str(len(payload))})
+
+    release = release_updates.ReleaseUpdate(
+        tag_name="v0.1.0b3",
+        version="0.1.0b3",
+        name="PFA update",
+        html_url="https://github.com/example/release",
+        published_at="2026-11-28T00:00:00Z",
+        body="",
+        asset_urls=browser_urls,
+        asset_api_urls=api_urls,
+        asset_hashes={
+            "SHA256SUMS.txt": hashlib.sha256(checksum_bytes).hexdigest(),
+            "Update-PFA-Portable.ps1": hashlib.sha256(updater_bytes).hexdigest(),
+            "PFA-Windows-x64.zip": hashlib.sha256(archive_bytes).hexdigest(),
+        },
+    )
+
+    bundle = release_updates.download_update_bundle(
+        release,
+        destination=tmp_path / "download",
+        opener=opener,
+    )
+
+    assert bundle.checksum_manifest.read_bytes() == checksum_bytes
+    assert bundle.updater_script.read_bytes() == updater_bytes
+    assert bundle.archive.read_bytes() == archive_bytes
+    assert requests[:2] == [
+        api_urls["SHA256SUMS.txt"],
+        browser_urls["SHA256SUMS.txt"],
+    ]
+
+
+def test_download_update_bundle_rejects_empty_or_truncated_asset(tmp_path: Path):
+    release = release_updates.ReleaseUpdate(
+        tag_name="v0.1.0b3",
+        version="0.1.0b3",
+        name="PFA update",
+        html_url="https://github.com/example/release",
+        published_at="2026-11-28T00:00:00Z",
+        body="",
+        asset_urls={name: f"https://example.test/{name}" for name in _REQUIRED},
+    )
+
+    def empty_opener(_request, timeout):
+        return _Response(b"")
+
+    with pytest.raises(OSError, match="non-empty GitHub release asset"):
+        release_updates.download_update_bundle(
+            release,
+            destination=tmp_path / "empty-download",
+            opener=empty_opener,
+        )
+    assert not (tmp_path / "empty-download" / "SHA256SUMS.txt").exists()
+
+    def truncated_opener(_request, timeout):
+        return _Response(b"short", headers={"Content-Length": "100"})
+
+    with pytest.raises(OSError, match="truncated release asset"):
+        release_updates._download_asset(
+            "https://example.test/truncated",
+            tmp_path / "truncated.bin",
+            timeout=1.0,
+            opener=truncated_opener,
+            progress=None,
+            asset_index=0,
+            asset_count=1,
+        )
+    assert not (tmp_path / "truncated.bin").exists()

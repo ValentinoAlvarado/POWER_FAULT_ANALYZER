@@ -3688,29 +3688,57 @@ Canvas editing shortcuts are scoped to the diagram so text fields and the Code &
         startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startup_info.wShowWindow = subprocess.SW_HIDE
         creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+        # Keep updater diagnostics outside the replaceable application directory.
+        # This log survives both a successful in-place replacement and cleanup of
+        # the temporary download bundle.
+        log_directory = (
+            Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
+            / "POWER_FAULT_ANALYZER"
+            / "Logs"
+            / "Updates"
+        )
+        updater_log_path = log_directory / f"{bundle.directory.name}.log"
+        updater_log = None
+        try:
+            log_directory.mkdir(parents=True, exist_ok=True)
+            updater_log = updater_log_path.open("a", encoding="utf-8")
+        except OSError:
+            updater_log_path = None
+
         try:
             subprocess.Popen(
                 arguments,
                 cwd=str(install_directory),
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=updater_log if updater_log is not None else subprocess.DEVNULL,
+                stderr=subprocess.STDOUT if updater_log is not None else subprocess.DEVNULL,
                 close_fds=True,
                 startupinfo=startup_info,
                 creationflags=creation_flags,
             )
         except OSError as exc:
+            if updater_log is not None:
+                updater_log.close()
             shutil.rmtree(bundle.directory, ignore_errors=True)
+            log_detail = f"\nUpdater diagnostics: {updater_log_path}" if updater_log_path else ""
             QMessageBox.critical(
                 self,
                 "PFA Update",
-                f"Could not start the portable updater. The current version was not changed.\n\n{exc}",
+                "Could not start the portable updater. The current version was not changed."
+                f"\n\n{exc}{log_detail}",
             )
             return
+        finally:
+            if updater_log is not None and not updater_log.closed:
+                updater_log.close()
 
-        self.statusBar().showMessage(
+        status_message = (
             "Update prepared. Closing PFA so the verified replacement can be applied…"
         )
+        if updater_log_path is not None:
+            status_message += f" Diagnostics: {updater_log_path}"
+        self.statusBar().showMessage(status_message)
         QTimer.singleShot(350, self.close)
 
     def _about(self) -> None:

@@ -64,7 +64,7 @@ def test_discover_latest_complete_release_including_prereleases():
     assert set(release.asset_urls) == set(_REQUIRED)
 
 
-def test_release_updates.discover_latest_release_returns_none_when_current_is_current():
+def test_discover_latest_release_returns_none_when_current_is_current():
     payload = [_release_payload("v0.1.0b2")]
 
     def opener(_request, timeout):
@@ -74,12 +74,12 @@ def test_release_updates.discover_latest_release_returns_none_when_current_is_cu
     assert release_updates.discover_latest_release("0.1.0b3", opener=opener) is None
 
 
-def test_release_updates.discover_latest_release_rejects_invalid_installed_version():
+def test_discover_latest_release_rejects_invalid_installed_version():
     with pytest.raises(ValueError, match="Installed PFA version is invalid"):
         release_updates.discover_latest_release("not-a-version", opener=lambda *_args, **_kwargs: _Response(b"[]"))
 
 
-def test_release_updates.load_installation_build_info_requires_matching_portable_metadata(tmp_path: Path):
+def test_load_installation_build_info_requires_matching_portable_metadata(tmp_path: Path):
     (tmp_path / "BUILD-INFO.json").write_text(
         json.dumps(
             {
@@ -101,7 +101,7 @@ def test_release_updates.load_installation_build_info_requires_matching_portable
     }
 
 
-def test_release_updates.load_installation_build_info_rejects_wrong_product(tmp_path: Path):
+def test_load_installation_build_info_rejects_wrong_product(tmp_path: Path):
     (tmp_path / "BUILD-INFO.json").write_text(
         json.dumps(
             {
@@ -117,7 +117,7 @@ def test_release_updates.load_installation_build_info_rejects_wrong_product(tmp_
     assert release_updates.load_installation_build_info(tmp_path) is None
 
 
-def test_release_updates.download_update_bundle_verifies_archive_and_updater_hashes(tmp_path: Path):
+def test_download_update_bundle_verifies_archive_and_updater_hashes(tmp_path: Path):
     archive_bytes = b"portable update archive bytes"
     updater_bytes = b"Write-Host 'verified updater'"
     checksum_bytes = (
@@ -161,7 +161,7 @@ def test_release_updates.download_update_bundle_verifies_archive_and_updater_has
     assert progress[-1] == 100
 
 
-def test_release_updates.download_update_bundle_rejects_modified_updater_script(tmp_path: Path):
+def test_download_update_bundle_rejects_modified_updater_script(tmp_path: Path):
     archive_bytes = b"portable update archive bytes"
     checksum_bytes = (
         f"{hashlib.sha256(archive_bytes).hexdigest()}  PFA-Windows-x64.zip\n"

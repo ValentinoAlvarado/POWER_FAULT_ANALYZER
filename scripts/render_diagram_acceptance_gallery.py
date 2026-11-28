@@ -88,7 +88,7 @@ def _page_size(document) -> tuple[float, float]:
 def _render_qt(workspace: NetworkWorkspace, output: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QPoint, Qt
-    from PySide6.QtGui import QFontMetricsF, QFontInfo, QImage, QPainter
+    from PySide6.QtGui import QFontInfo, QFontMetricsF, QImage, QPainter
     from PySide6.QtWidgets import QApplication
 
     from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import (

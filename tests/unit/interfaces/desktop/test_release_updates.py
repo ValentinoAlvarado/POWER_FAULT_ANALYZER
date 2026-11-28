@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import pytest
 from pathlib import Path
+
+import pytest
 
 from power_fault_analyzer.interfaces.desktop import release_updates
 

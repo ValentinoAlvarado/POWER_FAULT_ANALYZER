@@ -81,6 +81,23 @@ $backupMoved = $false
 $previousVersion = 'unknown'
 $newVersion = 'unknown'
 $newCommit = 'unknown'
+$uninstallRegistryPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\POWER_FAULT_ANALYZER'
+$previousUninstallDisplayName = $null
+$previousUninstallDisplayVersion = $null
+$hadUninstallDisplayName = $false
+$hadUninstallDisplayVersion = $false
+$uninstallRegistryUpdateStarted = $false
+if (Test-Path -LiteralPath $uninstallRegistryPath) {
+    $uninstallMetadata = Get-ItemProperty -LiteralPath $uninstallRegistryPath
+    if ($uninstallMetadata.PSObject.Properties.Name -contains 'DisplayName') {
+        $hadUninstallDisplayName = $true
+        $previousUninstallDisplayName = [string]$uninstallMetadata.DisplayName
+    }
+    if ($uninstallMetadata.PSObject.Properties.Name -contains 'DisplayVersion') {
+        $hadUninstallDisplayVersion = $true
+        $previousUninstallDisplayVersion = [string]$uninstallMetadata.DisplayVersion
+    }
+}
 
 function Write-PFAUpdateLog {
     param([string]$Status, [string]$Detail)
@@ -189,6 +206,12 @@ try {
         $migratedProjectCount++
     }
 
+    $previousUninstaller = Join-Path $backup 'Uninstall.exe'
+    $preserveUninstaller = Test-Path -LiteralPath $previousUninstaller -PathType Leaf
+    if ($preserveUninstaller) {
+        Copy-Item -LiteralPath $previousUninstaller -Destination (Join-Path $staging 'Uninstall.exe') -Force -ErrorAction Stop
+    }
+
     Move-Item -LiteralPath $staging -Destination $install -ErrorAction Stop
 
     $installedExe = Join-Path $install 'POWER_FAULT_ANALYZER.exe'
@@ -196,6 +219,14 @@ try {
     if (-not (Test-Path -LiteralPath $installedExe -PathType Leaf) -or
         -not (Test-Path -LiteralPath $installedInfo -PathType Leaf)) {
         throw 'The promoted application failed post-replacement verification.'
+    }
+    if ($preserveUninstaller -and -not (Test-Path -LiteralPath (Join-Path $install 'Uninstall.exe') -PathType Leaf)) {
+        throw 'The NSIS uninstaller was not preserved in the updated application directory.'
+    }
+    if ($preserveUninstaller -and (Test-Path -LiteralPath $uninstallRegistryPath)) {
+        $uninstallRegistryUpdateStarted = $true
+        Set-ItemProperty -LiteralPath $uninstallRegistryPath -Name 'DisplayName' -Value "POWER_FAULT_ANALYZER $newVersion" -ErrorAction Stop
+        Set-ItemProperty -LiteralPath $uninstallRegistryPath -Name 'DisplayVersion' -Value $newVersion -ErrorAction Stop
     }
 
     # Keep the backup after success. It is the operator's rollback copy.
@@ -231,6 +262,20 @@ catch {
         }
         catch {
             $rollbackDetail = "ROLLBACK FAILED. Previous application remains at $backup. $($_.Exception.Message)"
+        }
+    }
+    if ($uninstallRegistryUpdateStarted -and (Test-Path -LiteralPath $uninstallRegistryPath)) {
+        if ($hadUninstallDisplayName) {
+            Set-ItemProperty -LiteralPath $uninstallRegistryPath -Name 'DisplayName' -Value $previousUninstallDisplayName -ErrorAction SilentlyContinue
+        }
+        else {
+            Remove-ItemProperty -LiteralPath $uninstallRegistryPath -Name 'DisplayName' -ErrorAction SilentlyContinue
+        }
+        if ($hadUninstallDisplayVersion) {
+            Set-ItemProperty -LiteralPath $uninstallRegistryPath -Name 'DisplayVersion' -Value $previousUninstallDisplayVersion -ErrorAction SilentlyContinue
+        }
+        else {
+            Remove-ItemProperty -LiteralPath $uninstallRegistryPath -Name 'DisplayVersion' -ErrorAction SilentlyContinue
         }
     }
     Write-PFAUpdateLog -Status 'failure' -Detail "$($updateError.Exception.Message); $rollbackDetail"

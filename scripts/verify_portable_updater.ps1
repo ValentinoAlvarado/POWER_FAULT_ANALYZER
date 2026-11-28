@@ -56,6 +56,14 @@ try {
     $successInstall = Join-Path $successRoot 'application'
     New-Item -ItemType Directory -Path $successRoot | Out-Null
     New-TestInstall -Directory $successInstall -Version 'old-success-test'
+    Set-Content -LiteralPath (Join-Path $successInstall 'Uninstall.exe') -Value 'NSIS uninstaller sentinel' -Encoding ASCII
+    $uninstallRegistryPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\POWER_FAULT_ANALYZER'
+    if (Test-Path -LiteralPath $uninstallRegistryPath) {
+        throw 'PFA uninstall registry key unexpectedly exists before the isolated updater test.'
+    }
+    New-Item -Path $uninstallRegistryPath -Force | Out-Null
+    Set-ItemProperty -LiteralPath $uninstallRegistryPath -Name 'DisplayName' -Value 'POWER_FAULT_ANALYZER old-success-test'
+    Set-ItemProperty -LiteralPath $uninstallRegistryPath -Name 'DisplayVersion' -Value 'old-success-test'
     $legacyProjectPath = Join-Path $successInstall 'Legacy Project.pfa'
     Set-Content -LiteralPath $legacyProjectPath -Value '{"project":"legacy"}' -Encoding UTF8
     Set-Content -LiteralPath "$legacyProjectPath.network.json" -Value '{"network":"legacy"}' -Encoding UTF8
@@ -82,6 +90,20 @@ try {
     if (-not $successBackup) { throw 'Successful update did not retain the previous application backup.' }
     if (-not (Test-Path -LiteralPath (Join-Path $successBackup.FullName 'POWER_FAULT_ANALYZER.exe'))) {
         throw 'Previous application backup is incomplete.'
+    }
+    $updatedUninstaller = Join-Path $successInstall 'Uninstall.exe'
+    if (-not (Test-Path -LiteralPath $updatedUninstaller -PathType Leaf)) {
+        throw 'In-place update removed the NSIS uninstaller.'
+    }
+    if ((Get-Content -LiteralPath $updatedUninstaller -Raw).Trim() -ne 'NSIS uninstaller sentinel') {
+        throw 'In-place update changed the preserved NSIS uninstaller.'
+    }
+    $updatedUninstallMetadata = Get-ItemProperty -LiteralPath $uninstallRegistryPath
+    if ($updatedUninstallMetadata.DisplayVersion -ne $newInfo.version) {
+        throw 'Windows uninstall registry still reports the previous PFA version.'
+    }
+    if ($updatedUninstallMetadata.DisplayName -ne "POWER_FAULT_ANALYZER $($newInfo.version)") {
+        throw 'Windows uninstall display name was not updated to the new PFA version.'
     }
     if (-not (Test-Path -LiteralPath $externalProjectPath -PathType Leaf)) {
         throw 'Update changed a project stored outside the application directory.'
@@ -157,6 +179,7 @@ try {
 
     Write-Host 'PASS updater rejected checksum mismatch without modifying the installation.' -ForegroundColor Green
     Write-Host 'PASS updater promoted the new package and retained the previous application.' -ForegroundColor Green
+    Write-Host 'PASS NSIS uninstaller and Windows uninstall registry metadata survived the in-place update.' -ForegroundColor Green
     Write-Host 'PASS injected promotion failure restored the original application.' -ForegroundColor Green
     Write-Host 'PASS project documents outside the application directory remained intact.' -ForegroundColor Green
     Write-Host 'PASS legacy project documents and network sidecars inside the old install were migrated to Documents.' -ForegroundColor Green
@@ -164,6 +187,7 @@ try {
 finally {
     Remove-Item Function:\global:Move-Item -ErrorAction SilentlyContinue
     Remove-Variable PFA_UpdaterMoveCallCount -Scope Global -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\POWER_FAULT_ANALYZER' -Recurse -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $testRoot) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

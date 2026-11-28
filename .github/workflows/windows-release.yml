@@ -124,6 +124,17 @@ jobs:
           & $python scripts\render_diagram_acceptance_gallery.py --output-dir artifacts\diagram-review
           if ($LASTEXITCODE -ne 0) { throw "Diagram acceptance gallery failed with exit code $LASTEXITCODE." }
 
+      - name: Emit Qt and SVG comparisons for visual inspection
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $python = '.venv\\Scripts\\python.exe'
+          $ruff = '.venv\\Scripts\\ruff.exe'
+          & $ruff check scripts\\emit_diagram_review_previews.py
+          if ($LASTEXITCODE -ne 0) { throw 'Diagram preview lint failed.' }
+          & $python scripts\\emit_diagram_review_previews.py --directory artifacts\\diagram-review
+          if ($LASTEXITCODE -ne 0) { throw 'Diagram preview emission failed.' }
+
       - name: Upload diagram review images and vector sources
         uses: actions/upload-artifact@v4
         with:

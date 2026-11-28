@@ -5,9 +5,9 @@ import io
 import json
 from pathlib import Path
 
-import pytest
-
 from power_fault_analyzer.interfaces.desktop import release_updates
+
+import pytest
 
 
 _REQUIRED = (

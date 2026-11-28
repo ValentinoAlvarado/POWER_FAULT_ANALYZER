@@ -7,6 +7,7 @@ on:
       - "main"
       - "fix/portable-code-automation-worker"
       - "fix/diagram-auto-layout-r19"
+      - "build/slim-pyside6-package-20261128"
     tags:
       - "v*"
 

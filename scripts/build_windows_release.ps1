@@ -111,11 +111,18 @@ foreach ($generated in @($appFolder, $workPath, $specPath)) {
     }
 }
 
+# Keep PyInstaller's standard PySide6 hooks rather than collecting the entire package.
+# The previous blanket collection bundled the unused Qt WebEngine runtime, including
+# Chromium and DevTools resources. Explicit exclusions and the post-build audit below
+# prevent that payload from silently returning.
 Invoke-Checked 'Build standalone Windows x64 desktop application' {
     & $Python -m PyInstaller --noconfirm --clean --windowed --onedir `
         --name POWER_FAULT_ANALYZER `
         --paths src `
-        --collect-all PySide6 `
+        --exclude-module PySide6.QtWebEngineCore `
+        --exclude-module PySide6.QtWebEngineWidgets `
+        --exclude-module PySide6.QtWebEngineQuick `
+        --exclude-module PySide6.QtWebChannel `
         --collect-all shiboken6 `
         --collect-all numpy `
         --collect-all scipy `
@@ -141,6 +148,21 @@ Invoke-Checked 'Build standalone Windows x64 desktop application' {
 $executable = Join-Path $appFolder 'POWER_FAULT_ANALYZER.exe'
 if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
     throw 'PyInstaller completed without POWER_FAULT_ANALYZER.exe.'
+}
+
+# Guard against accidentally reintroducing the unused Chromium/Qt WebEngine payload.
+$webEngineFiles = Get-ChildItem -LiteralPath $appFolder -File -Recurse |
+    Where-Object { $_.Name -match '(?i)webengine' }
+if ($webEngineFiles) {
+    $names = ($webEngineFiles | ForEach-Object { $_.FullName }) -join [Environment]::NewLine
+    throw "Unused Qt WebEngine files were included in the release package:`n$names"
+}
+
+$bundleBytes = (Get-ChildItem -LiteralPath $appFolder -File -Recurse | Measure-Object -Property Length -Sum).Sum
+$bundleMegabytes = [math]::Round($bundleBytes / 1MB, 2)
+Write-Host "Standalone application payload: $bundleMegabytes MB" -ForegroundColor Cyan
+if ($bundleMegabytes -gt 850) {
+    throw "Standalone application payload exceeds the 850 MB release budget ($bundleMegabytes MB). Review collected dependencies before publishing."
 }
 if (-not $SkipTests) {
     Write-Host '== Frozen Windows executable startup acceptance ==' -ForegroundColor Cyan

@@ -238,7 +238,7 @@ if ($resourceMatch.Groups['number'].Success) {
 if ($resourceRevision -gt 65535) { throw 'Pre-release sequence exceeds Windows file-version limits.' }
 $versionParts = @([int]$resourceMatch.Groups['major'].Value, [int]$resourceMatch.Groups['minor'].Value, [int]$resourceMatch.Groups['patch'].Value, [int]$resourceRevision)
 if ($versionParts | Where-Object { $_ -gt 65535 }) { throw 'Version component exceeds Windows file-version limits.' }
-$resourceVersion = '{0}.{1}.{2}.{3}' -f $versionParts
+$resourceVersion = '{0}.{1}.{2}.{3}' -f $resourceMatch.Groups['major'].Value, $resourceMatch.Groups['minor'].Value, $resourceMatch.Groups['patch'].Value, $resourceRevision
 $setupPath = Join-Path $releaseDirectory 'PFA-Setup-x64.exe'
 if (Test-Path -LiteralPath $setupPath) { Remove-Item -LiteralPath $setupPath -Force }
 $nsisArgs = @(
@@ -282,7 +282,7 @@ finally {
 }
 
 $hashLines = @()
-foreach ($fileName in @('PFA-Windows-x64.zip', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json', 'Update-PFA-Portable.ps1')) {
+foreach ($fileName in @('PFA-Setup-x64.exe', 'PFA-Windows-x64.zip', 'SBOM.cdx.json', 'PYTHON-DEPENDENCY-LICENSES.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.json', 'Update-PFA-Portable.ps1')) {
     $path = Join-Path $releaseDirectory $fileName
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release sidecar missing: $path" }
     $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()

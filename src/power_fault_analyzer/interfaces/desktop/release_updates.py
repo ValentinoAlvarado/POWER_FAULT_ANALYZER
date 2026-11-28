@@ -16,6 +16,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from packaging.version import InvalidVersion, Version
@@ -87,7 +88,11 @@ def load_installation_build_info(
     }
 
 
-def _release_from_payload(payload: dict) -> ReleaseUpdate | None:
+def _release_from_payload(
+    payload: dict,
+    *,
+    repository: str = DEFAULT_REPOSITORY,
+) -> ReleaseUpdate | None:
     if payload.get("draft"):
         return None
 
@@ -97,11 +102,21 @@ def _release_from_payload(payload: dict) -> ReleaseUpdate | None:
     except InvalidVersion:
         return None
 
+    trusted_asset_prefix = f"/{repository}/releases/download/"
     assets: dict[str, str] = {}
     for asset in payload.get("assets", ()):
         name = str(asset.get("name", ""))
         url = str(asset.get("browser_download_url", ""))
-        if name in _REQUIRED_ASSETS and url.startswith("https://"):
+        try:
+            parsed_url = urlsplit(url)
+        except ValueError:
+            continue
+        is_trusted_github_asset = (
+            parsed_url.scheme == "https"
+            and parsed_url.hostname == "github.com"
+            and parsed_url.path.startswith(trusted_asset_prefix)
+        )
+        if name in _REQUIRED_ASSETS and is_trusted_github_asset:
             assets[name] = url
     if any(name not in assets for name in _REQUIRED_ASSETS):
         return None

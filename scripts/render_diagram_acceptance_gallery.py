@@ -88,15 +88,46 @@ def _page_size(document) -> tuple[float, float]:
 def _render_qt(workspace: NetworkWorkspace, output: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QPoint, Qt
-    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtGui import QFontMetricsF, QFontInfo, QImage, QPainter
     from PySide6.QtWidgets import QApplication
 
-    from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import NetworkCanvasView
+    from power_fault_analyzer.interfaces.desktop.workbench.network_canvas import (
+        NetworkCanvasView,
+        _installed_scene_font_families,
+    )
 
     app = QApplication.instance() or QApplication([])
+    installed_fonts = _installed_scene_font_families()
     view = NetworkCanvasView()
     view.resize(1800, 1200)
     view.set_workspace(workspace)
+    font_samples = []
+    for label_item in view._label_items.values():
+        font = label_item.font()
+        metrics = QFontMetricsF(font)
+        font_samples.append({
+            "family": font.family(),
+            "resolved_family": QFontInfo(font).family(),
+            "pixel_size": font.pixelSize(),
+            "latin_coverage": all(metrics.inFont(char) for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"),
+            "text": label_item.toPlainText()[:48],
+        })
+    unique_samples = {
+        (item["family"], item["resolved_family"], item["pixel_size"], item["latin_coverage"])
+        for item in font_samples
+    }
+    print(
+        "PFA_QT_FONT_DIAGNOSTICS|"
+        + json.dumps({
+            "installed_families": list(installed_fonts),
+            "samples": [dict(zip(
+                ("family", "resolved_family", "pixel_size", "latin_coverage"), item
+            )) for item in sorted(unique_samples)],
+            "label_count": len(font_samples),
+            "sample_text": [item["text"] for item in font_samples[:5]],
+        }, ensure_ascii=False, separators=(",", ":")),
+        flush=True,
+    )
     view.show()
     app.processEvents()
     scene_rect = view.scene().sceneRect()

@@ -5,6 +5,7 @@ import base64
 import hashlib
 import io
 import json
+import zipfile
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -92,6 +93,78 @@ def _comparison(case: dict[str, object], root: Path) -> bytes:
     return output.getvalue()
 
 
+
+def _verify_release(release_dir: Path, expected_commit: str) -> None:
+    build_info_path = release_dir / "BUILD-INFO.json"
+    checksum_path = release_dir / "SHA256SUMS.txt"
+    sbom_path = release_dir / "SBOM.cdx.json"
+    zip_path = release_dir / "PFA-Windows-x64.zip"
+    for path in (build_info_path, checksum_path, sbom_path, zip_path):
+        if not path.is_file():
+            raise FileNotFoundError(f"Release sidecar is missing: {path}")
+
+    build_info = json.loads(build_info_path.read_text(encoding="utf-8"))
+    if build_info.get("git_commit") != expected_commit:
+        raise RuntimeError(
+            f"BUILD-INFO commit {build_info.get('git_commit')} does not match "
+            f"gallery commit {expected_commit}."
+        )
+    if build_info.get("architecture") != "x64":
+        raise RuntimeError(f"Unexpected release architecture: {build_info.get('architecture')}")
+
+    checksums: dict[str, str] = {}
+    for line in checksum_path.read_text(encoding="utf-8-sig").splitlines():
+        parts = line.strip().split(maxsplit=1)
+        if len(parts) != 2 or len(parts[0]) != 64:
+            raise RuntimeError(f"Malformed SHA256SUMS row: {line}")
+        expected, filename = parts[0].lower(), parts[1].lstrip("*").strip()
+        target = release_dir / filename
+        if not target.is_file():
+            raise FileNotFoundError(f"Checksum target is missing: {target}")
+        actual = hashlib.sha256(target.read_bytes()).hexdigest()
+        if actual != expected:
+            raise RuntimeError(f"SHA-256 mismatch for release file: {filename}")
+        checksums[filename] = actual
+        print(f"PFA_RELEASE_SHA256|{filename}|{actual}", flush=True)
+    if "PFA-Windows-x64.zip" not in checksums:
+        raise RuntimeError("SHA256SUMS.txt does not cover PFA-Windows-x64.zip.")
+
+    with zipfile.ZipFile(zip_path) as archive:
+        embedded_info = next(
+            (name for name in archive.namelist() if Path(name).name == "BUILD-INFO.json"),
+            None,
+        )
+        if embedded_info is None:
+            raise RuntimeError("Portable package does not embed BUILD-INFO.json.")
+        embedded = json.loads(archive.read(embedded_info).decode("utf-8-sig"))
+        if embedded.get("git_commit") != expected_commit:
+            raise RuntimeError("Embedded BUILD-INFO commit does not match the accepted commit.")
+        if embedded.get("git_commit") != build_info.get("git_commit"):
+            raise RuntimeError("Embedded and sidecar BUILD-INFO files disagree.")
+
+    sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+    components = sbom.get("components", [])
+    print(
+        "PFA_RELEASE_INFO|"
+        + json.dumps(
+            {
+                "version": build_info.get("version"),
+                "architecture": build_info.get("architecture"),
+                "python": build_info.get("python"),
+                "git_commit": build_info.get("git_commit"),
+                "distribution": build_info.get("distribution"),
+                "zip_sha256": checksums["PFA-Windows-x64.zip"],
+                "zip_bytes": zip_path.stat().st_size,
+                "sbom_components": len(components),
+                "sbom_serial": sbom.get("serialNumber"),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        flush=True,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Emit compact Qt/SVG comparison previews into the GitHub Actions log."
@@ -105,7 +178,7 @@ def main() -> int:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     cases = manifest.get("cases")
     if not isinstance(cases, list):
-        raise RuntimeError("Gallery manifest does not contain a cases array.")
+        raise TypeError("Gallery manifest does not contain a cases array.")
     names = {str(case.get("name", "")) for case in cases}
     if len(cases) != 6 or names != EXPECTED_CASES:
         raise RuntimeError(
@@ -121,13 +194,28 @@ def main() -> int:
         payload = _comparison(case, root)
         digest = hashlib.sha256(payload).hexdigest()
         encoded = base64.b64encode(payload).decode("ascii")
-        print(f"PFA_REVIEW_IMAGE|{case['name']}|{digest}|{encoded}", flush=True)
+        name = str(case["name"])
+        chunk_size = 6000
+        total_chunks = (len(encoded) + chunk_size - 1) // chunk_size
+        print(f"PFA_REVIEW_IMAGE_BEGIN|{name}|{digest}|{total_chunks}", flush=True)
+        for chunk_index in range(total_chunks):
+            start = chunk_index * chunk_size
+            print(
+                f"PFA_REVIEW_IMAGE_CHUNK|{name}|{chunk_index}|"
+                f"{encoded[start:start + chunk_size]}",
+                flush=True,
+            )
+        print(f"PFA_REVIEW_IMAGE_END|{name}", flush=True)
         print(
-            f"PFA_REVIEW_CASE|{case['name']}|warnings={len(case.get('warnings', []))}"
-            f"|unresolved={case.get('unresolved', 0)}|partial={case.get('partial_data', 0)}",
+            f"PFA_REVIEW_CASE|{name}|buses={case.get('buses', 0)}"
+            f"|equipment={case.get('equipment', 0)}|terminals={case.get('terminals', 0)}"
+            f"|connections={case.get('connections', 0)}"
+            f"|unresolved={case.get('unresolved', 0)}|partial={case.get('partial_data', 0)}"
+            f"|warnings={json.dumps(case.get('warnings', []), ensure_ascii=False)}",
             flush=True,
         )
     print("PFA_REVIEW_PAIRS_COMPLETE|6", flush=True)
+    _verify_release(Path("dist/release"), str(manifest.get("commit", "")))
     return 0
 
 

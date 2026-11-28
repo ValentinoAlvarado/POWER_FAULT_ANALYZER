@@ -128,11 +128,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $python = '.venv\\Scripts\\python.exe'
-          $ruff = '.venv\\Scripts\\ruff.exe'
-          & $ruff check scripts\\emit_diagram_review_previews.py
+          $python = '.venv\Scripts\python.exe'
+          $ruff = '.venv\Scripts\ruff.exe'
+          & $ruff check scripts\emit_diagram_review_previews.py
           if ($LASTEXITCODE -ne 0) { throw 'Diagram preview lint failed.' }
-          & $python scripts\\emit_diagram_review_previews.py --directory artifacts\\diagram-review
+          & $python scripts\emit_diagram_review_previews.py --directory artifacts\diagram-review
           if ($LASTEXITCODE -ne 0) { throw 'Diagram preview emission failed.' }
 
       - name: Upload diagram review images and vector sources

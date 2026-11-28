@@ -62,6 +62,34 @@ try {
         throw 'The preflight update log did not record the empty-manifest failure.'
     }
 
+    # The updater must not mutate the installation until the desktop acknowledges
+    # that it has received the ready state and is closing.
+    $noAckRoot = Join-Path $testRoot 'handoff acknowledgement missing'
+    $noAckInstall = Join-Path $noAckRoot 'application'
+    New-Item -ItemType Directory -Path $noAckRoot | Out-Null
+    New-TestInstall -Directory $noAckInstall -Version 'old-no-ack-test'
+    $noAckStatusPath = Join-Path $noAckRoot 'updater.status'
+    $noAckRejected = $false
+    try {
+        & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $noAckInstall -WaitForProcessId 2147483647 -StatusPath $noAckStatusPath
+    }
+    catch {
+        if ($_.Exception.Message -like '*did not acknowledge the updater handoff*') {
+            $noAckRejected = $true
+        }
+        else {
+            throw
+        }
+    }
+    if (-not $noAckRejected) { throw 'Updater did not reject a handoff without desktop acknowledgement.' }
+    $noAckInfo = Get-Content -LiteralPath (Join-Path $noAckInstall 'BUILD-INFO.json') -Raw | ConvertFrom-Json
+    if ($noAckInfo.version -ne 'old-no-ack-test') {
+        throw 'Updater changed the installation before receiving the desktop acknowledgement.'
+    }
+    if ((Get-Content -LiteralPath $noAckStatusPath -TotalCount 1) -ne 'failed') {
+        throw 'Missing handoff acknowledgement did not report a failed updater state.'
+    }
+
     # A checksum mismatch must fail before the existing installation is moved.
     $badRoot = Join-Path $testRoot 'checksum failure'
     $badInstall = Join-Path $badRoot 'application'
@@ -163,6 +191,11 @@ try {
     Set-Content -LiteralPath $sidecarOnlyPath -Value '{"network":"existing-only-sidecar"}' -Encoding UTF8
 
     $successStatusPath = Join-Path $successRoot 'updater.status'
+    $ackJob = Start-Job -ScriptBlock {
+        param($StatusFile)
+        Start-Sleep -Milliseconds 400
+        [System.IO.File]::WriteAllText($StatusFile, 'accepted')
+    } -ArgumentList $successStatusPath
     $global:PFA_UpdaterStartProcessCount = 0
     function global:Start-Process {
         [CmdletBinding()]
@@ -183,11 +216,14 @@ try {
         }
     }
     try {
-        & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $successInstall -UserProjectsDirectory $projectDirectory -Restart -StatusPath $successStatusPath
+        & $updater -ZipPath $zip -ChecksumPath $checksum -InstallDirectory $successInstall -UserProjectsDirectory $projectDirectory -WaitForProcessId 2147483646 -Restart -StatusPath $successStatusPath
     }
     finally {
         Remove-Item Function:\global:Start-Process -ErrorAction SilentlyContinue
     }
+    Wait-Job -Job $ackJob | Out-Null
+    Receive-Job -Job $ackJob -ErrorAction Stop | Out-Null
+    Remove-Job -Job $ackJob -Force
     if ($global:PFA_UpdaterStartProcessCount -ne 1) {
         throw "Successful update did not launch exactly one replacement application (count: $global:PFA_UpdaterStartProcessCount)."
     }
@@ -300,7 +336,8 @@ try {
     Write-Host 'PASS updater rejected checksum mismatch without modifying the installation.' -ForegroundColor Green
     Write-Host 'PASS updater rolled back automatically when the replacement application failed to start.' -ForegroundColor Green
     Write-Host 'PASS updater relaunched the replacement application and confirmed it remained running.' -ForegroundColor Green
-    Write-Host 'PASS updater status handshake reported ready before application shutdown.' -ForegroundColor Green
+    Write-Host 'PASS updater status handshake rejected missing desktop acknowledgement without modifying the installation.' -ForegroundColor Green
+    Write-Host 'PASS updater status handshake reported ready and accepted states before applying the replacement.' -ForegroundColor Green
     Write-Host 'PASS updater promoted the new package and retained the previous application.' -ForegroundColor Green
     Write-Host 'PASS NSIS uninstaller and Windows uninstall registry metadata survived the in-place update.' -ForegroundColor Green
     Write-Host 'PASS injected promotion failure restored the original application.' -ForegroundColor Green
